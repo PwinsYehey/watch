@@ -1,4 +1,4 @@
-"""Locates and crops eye regions from a full face image via MediaPipe FaceMesh, bridging pre-cropped training data with real full-face deployment input."""
+"""Locates eye and mouth regions from a full face image via MediaPipe FaceMesh, bridging pre-cropped training data with real full-face deployment input."""
 
 from dataclasses import dataclass
 
@@ -17,12 +17,30 @@ _RIGHT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373]
 _LEFT_EYE_EAR_POINTS = {"horizontal": (33, 133), "vertical_a": (160, 144), "vertical_b": (158, 153)}
 _RIGHT_EYE_EAR_POINTS = {"horizontal": (362, 263), "vertical_a": (385, 380), "vertical_b": (387, 373)}
 
+# Landmark indices bounding the mouth region, and the MAR layout: one
+# horizontal corner pair, one vertical lip pair.
+_MOUTH_IDS = [61, 291, 13, 14, 78, 308, 0, 17]
+_MOUTH_MAR_POINTS = {"horizontal": (61, 291), "vertical": (13, 14)}
+
 
 @dataclass
 class EyeRegion:
     crop: np.ndarray
     box: tuple[int, int, int, int]
     ear: float
+
+
+@dataclass
+class MouthRegion:
+    crop: np.ndarray
+    box: tuple[int, int, int, int]
+    mar: float
+
+
+@dataclass
+class FaceRegions:
+    eyes: dict[str, EyeRegion]
+    mouth: MouthRegion
 
 
 def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float = 0.6):
@@ -64,8 +82,21 @@ def _eye_aspect_ratio(landmarks, w: int, h: int, ear_points: dict) -> float:
     return (vertical_a + vertical_b) / (2.0 * horizontal)
 
 
+def _mouth_aspect_ratio(landmarks, w: int, h: int) -> float:
+    """Higher MAR means more open; a wide, sustained MAR is what distinguishes yawning from talking."""
+    h1, h2 = _MOUTH_MAR_POINTS["horizontal"]
+    v1, v2 = _MOUTH_MAR_POINTS["vertical"]
+
+    horizontal = np.linalg.norm(_point(landmarks, h1, w, h) - _point(landmarks, h2, w, h))
+    vertical = np.linalg.norm(_point(landmarks, v1, w, h) - _point(landmarks, v2, w, h))
+
+    if horizontal == 0:
+        return 0.0
+    return vertical / horizontal
+
+
 class EyeRegionTracker:
-    """Reusable MediaPipe FaceMesh instance for per-frame eye tracking, avoiding the cost of re-initializing the model on every frame."""
+    """Reusable MediaPipe FaceMesh instance for per-frame eye/mouth tracking, avoiding the cost of re-initializing the model on every frame."""
 
     def __init__(self, static_image_mode: bool = False):
         self._face_mesh = _mp_face_mesh.FaceMesh(
@@ -76,8 +107,8 @@ class EyeRegionTracker:
             min_tracking_confidence=0.5,
         )
 
-    def extract(self, image_bgr: np.ndarray) -> dict[str, EyeRegion] | None:
-        """Returns {'left': EyeRegion, 'right': EyeRegion}, or None if no face/eyes could be located."""
+    def extract(self, image_bgr: np.ndarray) -> FaceRegions | None:
+        """Returns a FaceRegions with both eyes and the mouth, or None if no face could be located."""
         h, w = image_bgr.shape[:2]
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         results = self._face_mesh.process(image_rgb)
@@ -88,19 +119,25 @@ class EyeRegionTracker:
         landmarks = results.multi_face_landmarks[0].landmark
         left = _crop_from_landmarks(image_bgr, landmarks, _LEFT_EYE_IDS)
         right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS)
+        mouth = _crop_from_landmarks(image_bgr, landmarks, _MOUTH_IDS, margin=0.3)
 
-        if left is None or right is None:
+        if left is None or right is None or mouth is None:
             return None
 
         left_crop, left_box = left
         right_crop, right_box = right
+        mouth_crop, mouth_box = mouth
         left_ear = _eye_aspect_ratio(landmarks, w, h, _LEFT_EYE_EAR_POINTS)
         right_ear = _eye_aspect_ratio(landmarks, w, h, _RIGHT_EYE_EAR_POINTS)
+        mar = _mouth_aspect_ratio(landmarks, w, h)
 
-        return {
-            "left": EyeRegion(crop=left_crop, box=left_box, ear=left_ear),
-            "right": EyeRegion(crop=right_crop, box=right_box, ear=right_ear),
-        }
+        return FaceRegions(
+            eyes={
+                "left": EyeRegion(crop=left_crop, box=left_box, ear=left_ear),
+                "right": EyeRegion(crop=right_crop, box=right_box, ear=right_ear),
+            },
+            mouth=MouthRegion(crop=mouth_crop, box=mouth_box, mar=mar),
+        )
 
     def close(self):
         self._face_mesh.close()
@@ -112,7 +149,7 @@ class EyeRegionTracker:
         self.close()
 
 
-def extract_eye_crops(image_bgr: np.ndarray) -> dict[str, EyeRegion] | None:
-    """Convenience wrapper for a single standalone image: returns {'left': EyeRegion, 'right': EyeRegion}, or None."""
+def extract_face_regions(image_bgr: np.ndarray) -> FaceRegions | None:
+    """Convenience wrapper for a single standalone image: returns a FaceRegions, or None."""
     with EyeRegionTracker(static_image_mode=True) as tracker:
         return tracker.extract(image_bgr)
