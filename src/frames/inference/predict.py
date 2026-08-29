@@ -12,13 +12,15 @@ from frames.preprocessing.facemesh import extract_eye_crops
 
 
 def predict_eye_state(model, eye_crop_bgr: np.ndarray, image_size: tuple, class_names: list[str]):
+    """Returns (label, confidence, closed_probability), where closed_probability is the raw softmax score."""
     resized = cv2.resize(eye_crop_bgr, image_size)
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) / 255.0
     batch = np.expand_dims(rgb, axis=0)
 
     prediction = model.predict(batch, verbose=0)[0]
     predicted_index = int(np.argmax(prediction))
-    return class_names[predicted_index], float(prediction[predicted_index])
+    closed_probability = float(prediction[class_names.index("closed")])
+    return class_names[predicted_index], float(prediction[predicted_index]), closed_probability
 
 
 def main():
@@ -32,7 +34,7 @@ def main():
 
     model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
     if not model_path.exists():
-        raise FileNotFoundError(f"{model_path} not found -- run `python scripts/train.py` first.")
+        raise FileNotFoundError(f"{model_path} not found -- run `python cli/train.py` first.")
     model = tf.keras.models.load_model(model_path)
 
     image = cv2.imread(args.image_path)
@@ -44,9 +46,9 @@ def main():
         print("No face/eyes detected in this image (fully occluded, or no face present).")
         return
 
-    for side, (crop, _box) in eyes.items():
-        label, confidence = predict_eye_state(model, crop, image_size, class_names)
-        print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence)")
+    for side, region in eyes.items():
+        label, confidence, _closed_probability = predict_eye_state(model, region.crop, image_size, class_names)
+        print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence, EAR={region.ear:.2f})")
 
 
 if __name__ == "__main__":

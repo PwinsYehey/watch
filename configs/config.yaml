@@ -1,7 +1,4 @@
-# FRAMES - Facial Recognition & Alertness Monitoring Engine System
-# Central configuration. Scripts under scripts/ read this file instead of
-# hardcoding paths/hyperparameters, so the whole pipeline is reproducible
-# and portable across machines.
+# FRAMES - Facial Recognition & Alertness Monitoring Engine System central config.
 
 project:
   name: frames
@@ -16,8 +13,6 @@ paths:
 
 datasets:
   # Each dataset gets its own raw subfolder under paths.raw_dir.
-  # subject_pattern documents how a subject/session id is recovered from a
-  # filename or folder name -- required so splitting can be subject-disjoint.
   mrl_eye:
     raw_subdir: mrl_eye
     enabled: true
@@ -26,8 +21,7 @@ datasets:
     enabled: true
 
 split:
-  # Split is done by subject/session id, never by individual image, to avoid
-  # the leakage problem found in the original motorcycle-rider dataset.
+  # Split is done by subject/session id, never by individual image.
   ratios:
     train: 0.70
     val: 0.20
@@ -39,10 +33,7 @@ preprocessing:
   grayscale: false
 
 model:
-  # MRL/CEW ground truth is eye state (closed/open), not alert/drowsy.
-  # A single closed-eye frame could just be a blink -- "drowsy" is a
-  # temporal judgement (e.g. PERCLOS / sustained closure) built on top of
-  # this classifier's output, not a label this classifier is trained on.
+  # Ground truth is eye state (closed/open), not alert/drowsy -- see alertness section below.
   architecture: custom_cnn   # one of: custom_cnn, mobilenetv2
   dropout_rate: 0.5
   dense_units: 128
@@ -62,3 +53,15 @@ grid_search:
   dense_units: [64, 128]
   learning_rates: [0.0001, 0.00001]
   epochs_per_run: 15
+
+alertness:
+  # Turns per-frame eye-closedness into a live alert/drowsy judgement.
+  closed_duration_threshold_sec: 1.5
+  perclos_window_sec: 5.0
+  perclos_threshold: 0.5
+  closedness_threshold: 0.4
+
+ear:
+  # Eye Aspect Ratio thresholds, untuned starting values -- may need calibration.
+  open_threshold: 0.30
+  closed_threshold: 0.20
