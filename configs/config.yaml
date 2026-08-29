@@ -78,3 +78,16 @@ yawn:
   perclos_threshold: 0.8
   closedness_threshold: 0.5
   dip_grace_period_sec: 0.5
+
+head_pose:
+  # Head pitch (degrees) thresholds, calibrated from observed neutral (~5deg) and nodding (~20deg) values.
+  upright_threshold: 8
+  drooped_threshold: 20
+
+nod:
+  # Sustained head-droop duration counts as nodding off; no dip_grace_period since talking/looking around causes brief separate spikes that shouldn't be glued together.
+  closed_duration_threshold_sec: 2.0
+  perclos_window_sec: 6.0
+  perclos_threshold: 0.6
+  closedness_threshold: 0.5
+  dip_grace_period_sec: 0.0

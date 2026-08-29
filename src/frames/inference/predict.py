@@ -52,6 +52,7 @@ def main():
         print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence, EAR={eye.ear:.2f})")
 
     print(f"mouth: MAR={regions.mouth.mar:.2f}")
+    print(f"head pitch: {regions.pitch:.1f} deg" if regions.pitch is not None else "head pitch: unavailable")
 
 
 if __name__ == "__main__":
