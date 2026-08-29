@@ -1,4 +1,4 @@
-"""Live webcam alertness monitoring: tracks eyes and mouth per frame, overlays classification + confidence, and raises a not-alert warning from sustained eye closure or yawning."""
+"""Live webcam alertness monitoring: tracks eyes, mouth, and head pitch per frame, overlays classification + confidence, and raises a not-alert warning from sustained eye closure, yawning, or head droop."""
 
 import time
 from pathlib import Path
@@ -14,6 +14,7 @@ from frames.preprocessing.facemesh import EyeRegion, EyeRegionTracker, MouthRegi
 _OPEN_COLOR = (0, 200, 0)
 _CLOSED_COLOR = (0, 0, 220)
 _MOUTH_COLOR = (255, 200, 0)
+_HEAD_COLOR = (255, 0, 200)
 _NO_FACE_COLOR = (0, 165, 255)
 
 _BANNER_COLORS = {
@@ -63,15 +64,29 @@ def _draw_mouth(frame, region: MouthRegion, mar_cfg, yawn_cfg) -> float:
     return openness
 
 
-def _draw_banner(frame, state: str, eye_status, yawn_status):
+def _draw_head_pose(frame, pitch: float | None, head_pose_cfg) -> float | None:
+    if pitch is None:
+        return None
+    droop = _linear_score(pitch, head_pose_cfg["upright_threshold"], head_pose_cfg["drooped_threshold"])
+    label = "nodding" if droop >= 0.5 else "upright"
+    color = _HEAD_COLOR if label == "upright" else _CLOSED_COLOR
+    cv2.putText(
+        frame, f"head: {label} | pitch {pitch:.1f} deg", (20, 100),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2,
+    )
+    return droop
+
+
+def _draw_banner(frame, state: str, eye_status, yawn_status, nod_status):
     color = _BANNER_COLORS[state]
     text = _BANNER_TEXT[state]
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 50), color, -1)
     cv2.putText(frame, text, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
 
     detail = (
-        f"eyes closed {eye_status.closed_duration:.1f}s (PERCLOS {eye_status.perclos * 100:.0f}%) | "
-        f"mouth open {yawn_status.closed_duration:.1f}s (PERCLOS {yawn_status.perclos * 100:.0f}%)"
+        f"eyes closed {eye_status.closed_duration:.1f}s | "
+        f"mouth open {yawn_status.closed_duration:.1f}s | "
+        f"head drooped {nod_status.closed_duration:.1f}s"
     )
     cv2.putText(frame, detail, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
@@ -84,6 +99,8 @@ def main():
     ear_cfg = config["ear"]
     mar_cfg = config["mar"]
     yawn_cfg = config["yawn"]
+    head_pose_cfg = config["head_pose"]
+    nod_cfg = config["nod"]
 
     model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
     if not model_path.exists():
@@ -102,6 +119,13 @@ def main():
         perclos_threshold=yawn_cfg["perclos_threshold"],
         closedness_threshold=yawn_cfg["closedness_threshold"],
         dip_grace_period=yawn_cfg["dip_grace_period_sec"],
+    )
+    nod_monitor = AlertnessMonitor(
+        closed_duration_threshold=nod_cfg["closed_duration_threshold_sec"],
+        perclos_window=nod_cfg["perclos_window_sec"],
+        perclos_threshold=nod_cfg["perclos_threshold"],
+        closedness_threshold=nod_cfg["closedness_threshold"],
+        dip_grace_period=nod_cfg["dip_grace_period_sec"],
     )
 
     cap = cv2.VideoCapture(0)
@@ -129,22 +153,25 @@ def main():
                     # average both eyes so one drooping eyelid still raises the score
                     eye_closedness = sum(closed_scores.values()) / len(closed_scores)
                     mouth_openness = _draw_mouth(frame, regions.mouth, mar_cfg, yawn_cfg)
+                    head_droop = _draw_head_pose(frame, regions.pitch, head_pose_cfg)
                 else:
                     eye_closedness = None
                     mouth_openness = None
+                    head_droop = None
 
                 now = time.time()
                 eye_status = eye_monitor.update(eye_closedness, now)
                 yawn_status = yawn_monitor.update(mouth_openness, now)
+                nod_status = nod_monitor.update(head_droop, now)
 
                 if eye_status.state == "no_face":
                     overall_state = "no_face"
-                elif eye_status.state == "not_alert" or yawn_status.state == "not_alert":
+                elif "not_alert" in (eye_status.state, yawn_status.state, nod_status.state):
                     overall_state = "not_alert"
                 else:
                     overall_state = "alert"
 
-                _draw_banner(frame, overall_state, eye_status, yawn_status)
+                _draw_banner(frame, overall_state, eye_status, yawn_status, nod_status)
 
                 fps = 1.0 / (now - prev_time) if now > prev_time else 0.0
                 prev_time = now

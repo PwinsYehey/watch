@@ -22,6 +22,21 @@ _RIGHT_EYE_EAR_POINTS = {"horizontal": (362, 263), "vertical_a": (385, 380), "ve
 _MOUTH_IDS = [61, 291, 13, 14, 78, 308, 0, 17]
 _MOUTH_MAR_POINTS = {"horizontal": (61, 291), "vertical": (13, 14)}
 
+# Head-pose landmarks (nose tip, chin, eye corners, mouth corners) paired
+# with a generic 3D face model, for solvePnP-based pitch/yaw/roll estimation.
+_HEAD_POSE_IDS = [1, 152, 33, 263, 61, 291]
+_HEAD_POSE_MODEL_POINTS = np.array(
+    [
+        (0.0, 0.0, 0.0),        # nose tip
+        (0.0, -330.0, -65.0),   # chin
+        (-225.0, 170.0, -135.0),  # eye corner
+        (225.0, 170.0, -135.0),   # eye corner
+        (-150.0, -150.0, -125.0),  # mouth corner
+        (150.0, -150.0, -125.0),   # mouth corner
+    ],
+    dtype=np.float64,
+)
+
 
 @dataclass
 class EyeRegion:
@@ -41,6 +56,7 @@ class MouthRegion:
 class FaceRegions:
     eyes: dict[str, EyeRegion]
     mouth: MouthRegion
+    pitch: float | None
 
 
 def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float = 0.6):
@@ -80,6 +96,25 @@ def _eye_aspect_ratio(landmarks, w: int, h: int, ear_points: dict) -> float:
     if horizontal == 0:
         return 0.0
     return (vertical_a + vertical_b) / (2.0 * horizontal)
+
+
+def _head_pitch(landmarks, w: int, h: int) -> float | None:
+    """Head pitch in degrees via solvePnP, re-centered so a frontal/neutral head reads near 0 instead of near +-180."""
+    image_points = np.array([_point(landmarks, i, w, h) for i in _HEAD_POSE_IDS], dtype=np.float64)
+    focal_length = w
+    camera_matrix = np.array(
+        [[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]], dtype=np.float64
+    )
+    dist_coeffs = np.zeros((4, 1))
+
+    success, rvec, _tvec = cv2.solvePnP(_HEAD_POSE_MODEL_POINTS, image_points, camera_matrix, dist_coeffs)
+    if not success:
+        return None
+
+    rmat, _ = cv2.Rodrigues(rvec)
+    angles, *_ = cv2.RQDecomp3x3(rmat)
+    raw_pitch = float(angles[0])
+    return ((raw_pitch + 360.0) % 360.0) - 180.0
 
 
 def _mouth_aspect_ratio(landmarks, w: int, h: int) -> float:
@@ -130,6 +165,7 @@ class EyeRegionTracker:
         left_ear = _eye_aspect_ratio(landmarks, w, h, _LEFT_EYE_EAR_POINTS)
         right_ear = _eye_aspect_ratio(landmarks, w, h, _RIGHT_EYE_EAR_POINTS)
         mar = _mouth_aspect_ratio(landmarks, w, h)
+        pitch = _head_pitch(landmarks, w, h)
 
         return FaceRegions(
             eyes={
@@ -137,6 +173,7 @@ class EyeRegionTracker:
                 "right": EyeRegion(crop=right_crop, box=right_box, ear=right_ear),
             },
             mouth=MouthRegion(crop=mouth_crop, box=mouth_box, mar=mar),
+            pitch=pitch,
         )
 
     def close(self):
