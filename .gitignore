@@ -12,7 +12,6 @@ venv/
 
 # --- Data (never commit raw or generated datasets) ---
 data/raw/**
-data/processed/**
 
 # Splits are small CSV/JSON manifests, not images: keep them tracked
 !data/splits/**
