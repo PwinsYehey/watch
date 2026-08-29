@@ -95,9 +95,14 @@ def main_yawn():
 
     config = load_config()
     raw_dir = Path(config["paths"]["raw_dir"])
-    ds_config = config["yawn_dataset"]
 
-    combined = build_manifest("yawdd", raw_dir / ds_config["raw_subdir"])
+    manifests = []
+    for name, ds_config in config["yawn_dataset"].items():
+        if not ds_config.get("enabled", True):
+            continue
+        manifests.append(build_manifest(name, raw_dir / ds_config["raw_subdir"]))
+
+    combined = pd.concat(manifests, ignore_index=True)
     combined = split_manifest(combined, config["split"]["ratios"], seed=config["project"]["seed"])
     report_split(combined)
 
