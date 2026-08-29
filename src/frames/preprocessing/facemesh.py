@@ -12,6 +12,7 @@ _RIGHT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373]
 
 
 def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float = 0.6):
+    """Returns (crop, (x_min, y_min, x_max, y_max)), or None if the box is degenerate."""
     h, w = image.shape[:2]
     xs = [landmarks[i].x * w for i in ids]
     ys = [landmarks[i].y * h for i in ids]
@@ -27,19 +28,25 @@ def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: f
 
     if x_max <= x_min or y_max <= y_min:
         return None
-    return image[y_min:y_max, x_min:x_max]
+    return image[y_min:y_max, x_min:x_max], (x_min, y_min, x_max, y_max)
 
 
-def extract_eye_crops(image_bgr: np.ndarray) -> dict[str, np.ndarray] | None:
-    """Returns {'left': crop, 'right': crop} in BGR, or None if no face/eyes could be located."""
-    with _mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5,
-    ) as face_mesh:
+class EyeRegionTracker:
+    """Reusable MediaPipe FaceMesh instance for per-frame eye tracking, avoiding the cost of re-initializing the model on every frame."""
+
+    def __init__(self, static_image_mode: bool = False):
+        self._face_mesh = _mp_face_mesh.FaceMesh(
+            static_image_mode=static_image_mode,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+
+    def extract(self, image_bgr: np.ndarray):
+        """Returns {'left': (crop, box), 'right': (crop, box)}, or None if no face/eyes could be located."""
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(image_rgb)
+        results = self._face_mesh.process(image_rgb)
 
         if not results.multi_face_landmarks:
             return None
@@ -51,3 +58,18 @@ def extract_eye_crops(image_bgr: np.ndarray) -> dict[str, np.ndarray] | None:
         if left is None or right is None:
             return None
         return {"left": left, "right": right}
+
+    def close(self):
+        self._face_mesh.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
+
+def extract_eye_crops(image_bgr: np.ndarray):
+    """Convenience wrapper for a single standalone image: returns {'left': (crop, box), 'right': (crop, box)}, or None."""
+    with EyeRegionTracker(static_image_mode=True) as tracker:
+        return tracker.extract(image_bgr)

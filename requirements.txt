@@ -1,5 +1,5 @@
 tensorflow>=2.16,<2.19
-mediapipe>=0.10.14
+mediapipe==0.10.14
 opencv-python-headless>=4.9
 numpy>=1.26
 pandas>=2.2

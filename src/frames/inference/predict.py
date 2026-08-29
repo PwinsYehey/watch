@@ -44,7 +44,7 @@ def main():
         print("No face/eyes detected in this image (fully occluded, or no face present).")
         return
 
-    for side, crop in eyes.items():
+    for side, (crop, _box) in eyes.items():
         label, confidence = predict_eye_state(model, crop, image_size, class_names)
         print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence)")
 
