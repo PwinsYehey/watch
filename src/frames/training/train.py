@@ -59,7 +59,7 @@ def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: st
 
 def main():
     config = load_config()
-    _train(config, config["model"], config["training"], "manifest.csv", "best_model.keras", "training_history.csv")
+    _train(config, config["model"], config["training"], "manifest.csv", "best_eye_model.keras", "training_history.csv")
 
 
 def main_yawn():

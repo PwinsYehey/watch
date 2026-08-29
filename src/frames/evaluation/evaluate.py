@@ -75,7 +75,7 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
 
 def main():
     config = load_config()
-    _evaluate(config, config["model"], "manifest.csv", "best_model.keras", "")
+    _evaluate(config, config["model"], "manifest.csv", "best_eye_model.keras", "")
 
 
 def main_yawn():
