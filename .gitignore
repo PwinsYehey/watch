@@ -1,0 +1,27 @@
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# --- Data (never commit raw or generated datasets) ---
+data/raw/**
+data/processed/**
+
+# Splits are small CSV/JSON manifests, not images: keep them tracked
+!data/splits/**
+
+# --- Model artifacts & results (large binaries, regenerable) ---
+models/**
+results/**
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
