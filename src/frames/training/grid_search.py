@@ -1,5 +1,3 @@
-"""Grid search over architecture x dropout x dense_units x learning_rate, resumable via a CSV of already-completed runs."""
-
 import gc
 from itertools import product
 from pathlib import Path

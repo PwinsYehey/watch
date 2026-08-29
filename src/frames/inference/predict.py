@@ -1,13 +1,10 @@
-"""Single-image demo: predicts per-eye open/closed state from a full face/helmet photo."""
-
 import argparse
-from pathlib import Path
 
 import cv2
 import numpy as np
-import tensorflow as tf
 
 from frames.config import load_config
+from frames.models.build_model import load_trained_model
 from frames.preprocessing.facemesh import extract_face_regions
 
 
@@ -25,7 +22,7 @@ def predict_eye_state(model, eye_crop_bgr: np.ndarray, image_size: tuple, class_
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Predict eye state for both eyes in a face photo.")
+    parser = argparse.ArgumentParser(description="Report eye state, mouth MAR, and head pitch for a face photo.")
     parser.add_argument("image_path", help="Path to a full face / helmet-cam image")
     args = parser.parse_args()
 
@@ -33,10 +30,7 @@ def main():
     image_size = tuple(config["preprocessing"]["image_size"])
     class_names = config["model"]["class_names"]
 
-    model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
-    if not model_path.exists():
-        raise FileNotFoundError(f"{model_path} not found -- run `python cli/train.py` first.")
-    model = tf.keras.models.load_model(model_path)
+    model = load_trained_model(config)
 
     image = cv2.imread(args.image_path)
     if image is None:

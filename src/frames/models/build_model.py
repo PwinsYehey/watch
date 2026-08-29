@@ -1,9 +1,15 @@
-"""Model factory: custom lightweight CNN or a MobileNetV2 transfer-learning
-head, selected via config so grid search can compare them fairly.
-"""
+from pathlib import Path
 
 import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers
+
+
+def load_trained_model(config: dict) -> tf.keras.Model:
+    """Loads models/best_model.keras, raising a helpful error if `cli/train.py` hasn't been run yet."""
+    model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
+    if not model_path.exists():
+        raise FileNotFoundError(f"{model_path} not found -- run `python cli/train.py` first.")
+    return tf.keras.models.load_model(model_path)
 
 
 def _custom_cnn(input_shape):

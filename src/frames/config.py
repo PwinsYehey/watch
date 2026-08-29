@@ -1,5 +1,3 @@
-"""Load the project's central YAML config."""
-
 from pathlib import Path
 
 import yaml
@@ -13,8 +11,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Resolve all path-like entries relative to the project root so scripts
-    # behave the same no matter which directory they're invoked from.
+    # resolve paths relative to the project root regardless of invocation directory
     for key, value in config["paths"].items():
         config["paths"][key] = str(PROJECT_ROOT / value)
 

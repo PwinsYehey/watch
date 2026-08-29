@@ -1,5 +1,3 @@
-"""Subject-disjoint train/val/test split: subjects are shuffled and sliced, never individual images, so no subject can leak across splits."""
-
 from pathlib import Path
 
 import numpy as np

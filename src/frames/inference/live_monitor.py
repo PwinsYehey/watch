@@ -1,14 +1,11 @@
-"""Live webcam alertness monitoring: tracks eyes, mouth, and head pitch per frame, overlays classification + confidence, and raises a not-alert warning from sustained eye closure, yawning, or head droop."""
-
 import time
-from pathlib import Path
 
 import cv2
-import tensorflow as tf
 
 from frames.config import load_config
 from frames.inference.alertness import AlertnessMonitor
 from frames.inference.predict import predict_eye_state
+from frames.models.build_model import load_trained_model
 from frames.preprocessing.facemesh import EyeRegion, EyeRegionTracker, MouthRegion
 
 _OPEN_COLOR = (0, 200, 0)
@@ -36,6 +33,17 @@ def _linear_score(value: float, low_at_zero: float, high_at_one: float) -> float
         return 0.0
     score = (value - low_at_zero) / span
     return max(0.0, min(1.0, score))
+
+
+def _build_monitor(cfg: dict) -> AlertnessMonitor:
+    """Builds an AlertnessMonitor from a config section (alertness/yawn/nod all share this shape)."""
+    return AlertnessMonitor(
+        closed_duration_threshold=cfg["closed_duration_threshold_sec"],
+        perclos_window=cfg["perclos_window_sec"],
+        perclos_threshold=cfg["perclos_threshold"],
+        closedness_threshold=cfg["closedness_threshold"],
+        dip_grace_period=cfg.get("dip_grace_period_sec", 0.0),
+    )
 
 
 def _draw_eye(frame, side: str, region: EyeRegion, model, image_size, class_names, ear_cfg) -> float:
@@ -102,31 +110,11 @@ def main():
     head_pose_cfg = config["head_pose"]
     nod_cfg = config["nod"]
 
-    model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
-    if not model_path.exists():
-        raise FileNotFoundError(f"{model_path} not found -- run `python cli/train.py` first.")
-    model = tf.keras.models.load_model(model_path)
+    model = load_trained_model(config)
 
-    eye_monitor = AlertnessMonitor(
-        closed_duration_threshold=alertness_cfg["closed_duration_threshold_sec"],
-        perclos_window=alertness_cfg["perclos_window_sec"],
-        perclos_threshold=alertness_cfg["perclos_threshold"],
-        closedness_threshold=alertness_cfg["closedness_threshold"],
-    )
-    yawn_monitor = AlertnessMonitor(
-        closed_duration_threshold=yawn_cfg["closed_duration_threshold_sec"],
-        perclos_window=yawn_cfg["perclos_window_sec"],
-        perclos_threshold=yawn_cfg["perclos_threshold"],
-        closedness_threshold=yawn_cfg["closedness_threshold"],
-        dip_grace_period=yawn_cfg["dip_grace_period_sec"],
-    )
-    nod_monitor = AlertnessMonitor(
-        closed_duration_threshold=nod_cfg["closed_duration_threshold_sec"],
-        perclos_window=nod_cfg["perclos_window_sec"],
-        perclos_threshold=nod_cfg["perclos_threshold"],
-        closedness_threshold=nod_cfg["closedness_threshold"],
-        dip_grace_period=nod_cfg["dip_grace_period_sec"],
-    )
+    eye_monitor = _build_monitor(alertness_cfg)
+    yawn_monitor = _build_monitor(yawn_cfg)
+    nod_monitor = _build_monitor(nod_cfg)
 
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FPS, 30)

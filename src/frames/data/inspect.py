@@ -1,5 +1,3 @@
-"""Reports subject counts, images-per-subject, and class balance for a dataset manifest, before any training happens."""
-
 from pathlib import Path
 
 import pandas as pd

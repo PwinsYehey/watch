@@ -1,18 +1,14 @@
-"""Evaluate the trained model on the held-out test split: classification
-report, confusion matrix, ROC-AUC, and per-image predictions for later
-error analysis."""
-
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import tensorflow as tf
 from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
 
 from frames.config import load_config
 from frames.data.generators import make_generators
+from frames.models.build_model import load_trained_model
 
 
 def main():
@@ -21,10 +17,7 @@ def main():
 
     _, _, test_generator = make_generators(config)
 
-    model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
-    if not model_path.exists():
-        raise FileNotFoundError(f"{model_path} not found -- run `python scripts/train.py` first.")
-    model = tf.keras.models.load_model(model_path)
+    model = load_trained_model(config)
 
     results_dir = Path(config["paths"]["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)

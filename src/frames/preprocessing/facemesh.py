@@ -1,5 +1,3 @@
-"""Locates eye and mouth regions from a full face image via MediaPipe FaceMesh, bridging pre-cropped training data with real full-face deployment input."""
-
 from dataclasses import dataclass
 
 import cv2
@@ -12,18 +10,15 @@ _mp_face_mesh = mp.solutions.face_mesh
 _LEFT_EYE_IDS = [33, 133, 159, 145, 160, 144, 158, 153]
 _RIGHT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373]
 
-# The same eye landmarks organized into the classic 6-point EAR layout
-# (Soukupova & Cech): one horizontal corner pair, two vertical eyelid pairs.
+# The same eye landmarks organized into the classic 6-point EAR layout (Soukupova & Cech).
 _LEFT_EYE_EAR_POINTS = {"horizontal": (33, 133), "vertical_a": (160, 144), "vertical_b": (158, 153)}
 _RIGHT_EYE_EAR_POINTS = {"horizontal": (362, 263), "vertical_a": (385, 380), "vertical_b": (387, 373)}
 
-# Landmark indices bounding the mouth region, and the MAR layout: one
-# horizontal corner pair, one vertical lip pair.
+# Landmark indices bounding the mouth region, and the MAR layout.
 _MOUTH_IDS = [61, 291, 13, 14, 78, 308, 0, 17]
 _MOUTH_MAR_POINTS = {"horizontal": (61, 291), "vertical": (13, 14)}
 
-# Head-pose landmarks (nose tip, chin, eye corners, mouth corners) paired
-# with a generic 3D face model, for solvePnP-based pitch/yaw/roll estimation.
+# Head-pose landmarks paired with a generic 3D face model for solvePnP.
 _HEAD_POSE_IDS = [1, 152, 33, 263, 61, 291]
 _HEAD_POSE_MODEL_POINTS = np.array(
     [
@@ -143,7 +138,7 @@ class EyeRegionTracker:
         )
 
     def extract(self, image_bgr: np.ndarray) -> FaceRegions | None:
-        """Returns a FaceRegions with both eyes and the mouth, or None if no face could be located."""
+        """Returns a FaceRegions with both eyes, the mouth, and head pitch, or None if no face could be located."""
         h, w = image_bgr.shape[:2]
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         results = self._face_mesh.process(image_rgb)

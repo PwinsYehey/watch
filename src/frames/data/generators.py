@@ -1,5 +1,3 @@
-"""Builds Keras data generators from the split manifest CSV via flow_from_dataframe, since images aren't sorted into per-class folders."""
-
 from pathlib import Path
 
 import pandas as pd

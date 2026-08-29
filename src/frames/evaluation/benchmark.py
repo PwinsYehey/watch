@@ -1,5 +1,3 @@
-"""Reports model size and inference speed, the same methodology as the original paper's Table VII."""
-
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +5,7 @@ import pandas as pd
 import tensorflow as tf
 
 from frames.config import load_config
+from frames.models.build_model import load_trained_model
 
 
 def measure_inference_time(model, input_shape: tuple, warmup_runs: int = 10, test_runs: int = 100):
@@ -29,10 +28,7 @@ def main():
     image_size = tuple(config["preprocessing"]["image_size"])
     input_shape = image_size + (3,)
 
-    model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
-    if not model_path.exists():
-        raise FileNotFoundError(f"{model_path} not found -- run `python cli/train.py` first.")
-    model = tf.keras.models.load_model(model_path)
+    model = load_trained_model(config)
 
     total_params = model.count_params()
     size_mb = (total_params * 4) / (1024 ** 2)

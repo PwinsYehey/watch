@@ -1,7 +1,3 @@
-"""The one property this whole repo exists to guarantee: no subject leaks
-across train/val/test. This is a regression test for the exact bug found
-in the original motorcycle-rider dataset."""
-
 import pandas as pd
 
 from frames.data.split import split_manifest, report_split

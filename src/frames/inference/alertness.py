@@ -1,5 +1,3 @@
-"""Turns per-frame eye-closedness scores into an alert/not_alert judgement via sustained-closure duration and PERCLOS."""
-
 from collections import deque
 from dataclasses import dataclass
 
@@ -40,8 +38,7 @@ class AlertnessMonitor:
             if self._closed_since is None:
                 self._closed_since = now
         else:
-            # a brief dip below threshold doesn't reset the streak until it
-            # outlasts dip_grace_period, tolerating natural movement mid-gesture
+            # a brief dip below threshold doesn't reset the streak until it outlasts dip_grace_period
             if self._below_since is None:
                 self._below_since = now
             if now - self._below_since > self.dip_grace_period:

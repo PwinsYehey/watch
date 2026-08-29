@@ -1,5 +1,3 @@
-"""Build a unified manifest (filepath, dataset, subject_id, label) for each supported raw dataset."""
-
 from pathlib import Path
 
 import pandas as pd

@@ -1,6 +1,3 @@
-"""Train the final model using the architecture/hyperparameters in config
-(normally the winner of grid_search.py)."""
-
 from pathlib import Path
 
 import pandas as pd
