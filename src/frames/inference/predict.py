@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 
 from frames.config import load_config
-from frames.preprocessing.facemesh import extract_eye_crops
+from frames.preprocessing.facemesh import extract_face_regions
 
 
 def predict_eye_state(model, eye_crop_bgr: np.ndarray, image_size: tuple, class_names: list[str]):
@@ -17,7 +17,8 @@ def predict_eye_state(model, eye_crop_bgr: np.ndarray, image_size: tuple, class_
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) / 255.0
     batch = np.expand_dims(rgb, axis=0)
 
-    prediction = model.predict(batch, verbose=0)[0]
+    # direct call instead of model.predict(), which costs ~5x more per single-frame call
+    prediction = model(batch, training=False)[0].numpy()
     predicted_index = int(np.argmax(prediction))
     closed_probability = float(prediction[class_names.index("closed")])
     return class_names[predicted_index], float(prediction[predicted_index]), closed_probability
@@ -41,14 +42,16 @@ def main():
     if image is None:
         raise FileNotFoundError(f"Could not read image: {args.image_path}")
 
-    eyes = extract_eye_crops(image)
-    if eyes is None:
-        print("No face/eyes detected in this image (fully occluded, or no face present).")
+    regions = extract_face_regions(image)
+    if regions is None:
+        print("No face detected in this image (fully occluded, or no face present).")
         return
 
-    for side, region in eyes.items():
-        label, confidence, _closed_probability = predict_eye_state(model, region.crop, image_size, class_names)
-        print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence, EAR={region.ear:.2f})")
+    for side, eye in regions.eyes.items():
+        label, confidence, _closed_probability = predict_eye_state(model, eye.crop, image_size, class_names)
+        print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence, EAR={eye.ear:.2f})")
+
+    print(f"mouth: MAR={regions.mouth.mar:.2f}")
 
 
 if __name__ == "__main__":
