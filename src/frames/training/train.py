@@ -9,6 +9,7 @@ from frames.models.build_model import build_model
 
 
 def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: str, checkpoint_name: str, history_name: str):
+    tf.keras.utils.set_random_seed(config["project"]["seed"])
     image_size = tuple(config["preprocessing"]["image_size"])
 
     train_generator, val_generator, _ = make_generators(

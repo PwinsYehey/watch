@@ -21,8 +21,10 @@ datasets:
     enabled: true
 
 yawn_dataset:
-  # Real subject ids from the YawDD Mirror set, extracted via cli/extract_yawdd.py.
-  raw_subdir: yawdd
+  yawdd:
+    # Real subject ids from the YawDD Mirror set, extracted via cli/extract_yawdd.py.
+    raw_subdir: yawdd
+    enabled: true
 
 split:
   # Split is done by subject/session id, never by individual image.
