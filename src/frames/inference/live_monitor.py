@@ -4,7 +4,7 @@ import cv2
 
 from frames.config import load_config
 from frames.inference.alertness import AlertnessMonitor
-from frames.inference.predict import predict_eye_state
+from frames.inference.predict import predict_eye_state, predict_yawn_state
 from frames.models.build_model import load_trained_model
 from frames.preprocessing.facemesh import EyeRegion, EyeRegionTracker, MouthRegion
 
@@ -47,27 +47,33 @@ def _build_monitor(cfg: dict) -> AlertnessMonitor:
 
 
 def _draw_eye(frame, side: str, region: EyeRegion, model, image_size, class_names, ear_cfg) -> float:
-    label, confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
+    _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
     ear_closedness = _linear_score(region.ear, ear_cfg["open_threshold"], ear_cfg["closed_threshold"])
     # either signal suggesting closure is enough -- a safety monitor should not need both to agree
     closedness = max(cnn_closedness, ear_closedness)
+    # the displayed label always matches this combined score, not just the CNN's own opinion
+    label = "closed" if closedness >= 0.5 else "open"
 
     color = _OPEN_COLOR if label == "open" else _CLOSED_COLOR
     x_min, y_min, x_max, y_max = region.box
     cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), color, 2)
-    text = f"{side}: {label} {confidence * 100:.0f}% | EAR {region.ear:.2f}"
+    text = f"{side}: {label} {closedness * 100:.0f}% | EAR {region.ear:.2f}"
     cv2.putText(frame, text, (x_min, max(y_min - 8, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     return closedness
 
 
-def _draw_mouth(frame, region: MouthRegion, mar_cfg, yawn_cfg) -> float:
-    openness = _linear_score(region.mar, mar_cfg["closed_threshold"], mar_cfg["open_threshold"])
-    label = "yawn" if openness >= yawn_cfg["closedness_threshold"] else "no yawn"
-    color = _CLOSED_COLOR if label == "yawn" else _MOUTH_COLOR
+def _draw_mouth(frame, region: MouthRegion, yawn_model, image_size, yawn_class_names, mar_cfg) -> float:
+    _cnn_label, _cnn_confidence, cnn_openness = predict_yawn_state(yawn_model, region.crop, image_size, yawn_class_names)
+    mar_openness = _linear_score(region.mar, mar_cfg["closed_threshold"], mar_cfg["open_threshold"])
+    # either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
+    openness = max(cnn_openness, mar_openness)
+    # the displayed label always matches this combined score, not just the CNN's own opinion
+    label = "yawn" if openness >= 0.5 else "no yawn"
 
+    color = _CLOSED_COLOR if label == "yawn" else _MOUTH_COLOR
     x_min, y_min, x_max, y_max = region.box
     cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), color, 2)
-    text = f"mouth: {label} | MAR {region.mar:.2f}"
+    text = f"mouth: {label} {openness * 100:.0f}% | MAR {region.mar:.2f}"
     cv2.putText(frame, text, (x_min, max(y_min - 8, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     return openness
 
@@ -103,6 +109,7 @@ def main():
     config = load_config()
     image_size = tuple(config["preprocessing"]["image_size"])
     class_names = config["model"]["class_names"]
+    yawn_class_names = config["yawn_model"]["class_names"]
     alertness_cfg = config["alertness"]
     ear_cfg = config["ear"]
     mar_cfg = config["mar"]
@@ -111,6 +118,7 @@ def main():
     nod_cfg = config["nod"]
 
     model = load_trained_model(config)
+    yawn_model = load_trained_model(config, checkpoint_name="best_yawn_model.keras")
 
     eye_monitor = _build_monitor(alertness_cfg)
     yawn_monitor = _build_monitor(yawn_cfg)
@@ -140,7 +148,7 @@ def main():
                     }
                     # average both eyes so one drooping eyelid still raises the score
                     eye_closedness = sum(closed_scores.values()) / len(closed_scores)
-                    mouth_openness = _draw_mouth(frame, regions.mouth, mar_cfg, yawn_cfg)
+                    mouth_openness = _draw_mouth(frame, regions.mouth, yawn_model, image_size, yawn_class_names, mar_cfg)
                     head_droop = _draw_head_pose(frame, regions.pitch, head_pose_cfg)
                 else:
                     eye_closedness = None

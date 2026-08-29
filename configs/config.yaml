@@ -20,6 +20,10 @@ datasets:
     raw_subdir: cew
     enabled: true
 
+yawn_dataset:
+  # Real subject ids from the YawDD Mirror set, extracted via cli/extract_yawdd.py.
+  raw_subdir: yawdd
+
 split:
   # Split is done by subject/session id, never by individual image.
   ratios:
@@ -47,6 +51,20 @@ training:
   early_stopping_patience: 5
   reduce_lr_patience: 2
 
+yawn_model:
+  architecture: tiny_cnn
+  dropout_rate: 0.5
+  dense_units: 64
+  learning_rate: 0.0001
+  num_classes: 2
+  class_names: [no_yawn, yawn]
+
+yawn_training:
+  batch_size: 32
+  epochs: 30
+  early_stopping_patience: 8
+  reduce_lr_patience: 3
+
 grid_search:
   architectures: [custom_cnn, mobilenetv2]
   dropout_rates: [0.3, 0.5]
@@ -67,7 +85,7 @@ ear:
   closed_threshold: 0.10
 
 mar:
-  # Mouth Aspect Ratio thresholds, untuned starting values -- may need calibration.
+  # Mouth Aspect Ratio thresholds -- 0.6 also marks the yawn cutoff used when filtering YawDD frames.
   closed_threshold: 0.3
   open_threshold: 0.6
 

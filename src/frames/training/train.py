@@ -8,13 +8,15 @@ from frames.data.generators import make_generators
 from frames.models.build_model import build_model
 
 
-def main():
-    config = load_config()
-    model_cfg = config["model"]
-    train_cfg = config["training"]
+def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: str, checkpoint_name: str, history_name: str):
     image_size = tuple(config["preprocessing"]["image_size"])
 
-    train_generator, val_generator, _ = make_generators(config)
+    train_generator, val_generator, _ = make_generators(
+        config,
+        manifest_filename=manifest_filename,
+        batch_size=train_cfg["batch_size"],
+        class_names=model_cfg["class_names"],
+    )
 
     model, early_stop, reduce_lr = build_model(
         architecture=model_cfg["architecture"],
@@ -29,7 +31,7 @@ def main():
 
     models_dir = Path(config["paths"]["models_dir"])
     models_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = models_dir / "best_model.keras"
+    checkpoint_path = models_dir / checkpoint_name
 
     checkpoint = tf.keras.callbacks.ModelCheckpoint(
         filepath=str(checkpoint_path),
@@ -48,10 +50,21 @@ def main():
 
     results_dir = Path(config["paths"]["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(history.history).to_csv(results_dir / "training_history.csv", index=False)
+    history_path = results_dir / history_name
+    pd.DataFrame(history.history).to_csv(history_path, index=False)
 
     print(f"\nBest model saved to: {checkpoint_path}")
-    print(f"Training history saved to: {results_dir / 'training_history.csv'}")
+    print(f"Training history saved to: {history_path}")
+
+
+def main():
+    config = load_config()
+    _train(config, config["model"], config["training"], "manifest.csv", "best_model.keras", "training_history.csv")
+
+
+def main_yawn():
+    config = load_config()
+    _train(config, config["yawn_model"], config["yawn_training"], "yawn_manifest.csv", "best_yawn_model.keras", "yawn_training_history.csv")
 
 
 if __name__ == "__main__":

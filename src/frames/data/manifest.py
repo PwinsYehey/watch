@@ -81,9 +81,30 @@ def build_cew_manifest(raw_dir: str | Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_yawdd_manifest(raw_dir: str | Path) -> pd.DataFrame:
+    """Parses '<subjectId>_<category>_<frameIdx>.jpg' (e.g. 'male7_yawning_00250.jpg'), a real subject id from the YawDD Mirror set."""
+    root = Path(raw_dir)
+    rows = []
+
+    for label, subdir in [("yawn", "yawn"), ("no_yawn", "no_yawn")]:
+        for path in sorted((root / subdir).glob("*.jpg")):
+            subject_id = path.stem.split("_")[0]
+            rows.append(
+                {
+                    "filepath": str(path),
+                    "dataset": "yawdd",
+                    "subject_id": subject_id,
+                    "label": label,
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
 BUILDERS = {
     "mrl_eye": build_mrl_eye_manifest,
     "cew": build_cew_manifest,
+    "yawdd": build_yawdd_manifest,
 }
 
 
