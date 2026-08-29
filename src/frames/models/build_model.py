@@ -4,11 +4,11 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers
 
 
-def load_trained_model(config: dict) -> tf.keras.Model:
-    """Loads models/best_model.keras, raising a helpful error if `cli/train.py` hasn't been run yet."""
-    model_path = Path(config["paths"]["models_dir"]) / "best_model.keras"
+def load_trained_model(config: dict, checkpoint_name: str = "best_model.keras") -> tf.keras.Model:
+    """Loads a model checkpoint, raising a helpful error if it hasn't been trained yet."""
+    model_path = Path(config["paths"]["models_dir"]) / checkpoint_name
     if not model_path.exists():
-        raise FileNotFoundError(f"{model_path} not found -- run `python cli/train.py` first.")
+        raise FileNotFoundError(f"{model_path} not found -- train it first.")
     return tf.keras.models.load_model(model_path)
 
 
@@ -30,6 +30,19 @@ def _custom_cnn(input_shape):
     )
 
 
+def _tiny_cnn(input_shape):
+    return models.Sequential(
+        [
+            layers.Input(shape=input_shape),
+            layers.Conv2D(16, 3, padding="same", activation="relu"),
+            layers.MaxPooling2D(),
+            layers.Conv2D(32, 3, padding="same", activation="relu"),
+            layers.MaxPooling2D(),
+        ],
+        name="tiny_cnn_backbone",
+    )
+
+
 def _mobilenetv2_backbone(input_shape):
     base_model = tf.keras.applications.MobileNetV2(
         include_top=False,
@@ -42,6 +55,7 @@ def _mobilenetv2_backbone(input_shape):
 
 BACKBONES = {
     "custom_cnn": _custom_cnn,
+    "tiny_cnn": _tiny_cnn,
     "mobilenetv2": _mobilenetv2_backbone,
 }
 

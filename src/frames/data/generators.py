@@ -6,8 +6,8 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from frames.config import PROJECT_ROOT
 
 
-def load_split_manifest(splits_dir: str | Path) -> pd.DataFrame:
-    path = Path(splits_dir) / "manifest.csv"
+def load_split_manifest(splits_dir: str | Path, filename: str = "manifest.csv") -> pd.DataFrame:
+    path = Path(splits_dir) / filename
     if not path.exists():
         raise FileNotFoundError(f"{path} not found -- run `python cli/make_splits.py` first.")
     manifest = pd.read_csv(path)
@@ -16,11 +16,11 @@ def load_split_manifest(splits_dir: str | Path) -> pd.DataFrame:
     return manifest
 
 
-def make_generators(config: dict):
-    manifest = load_split_manifest(config["paths"]["splits_dir"])
+def make_generators(config: dict, manifest_filename: str = "manifest.csv", batch_size: int = None, class_names: list = None):
+    manifest = load_split_manifest(config["paths"]["splits_dir"], manifest_filename)
     image_size = tuple(config["preprocessing"]["image_size"])
-    batch_size = config["training"]["batch_size"]
-    class_names = config["model"]["class_names"]
+    batch_size = batch_size or config["training"]["batch_size"]
+    class_names = class_names or config["model"]["class_names"]
 
     train_datagen = ImageDataGenerator(
         rescale=1.0 / 255,

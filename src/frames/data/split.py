@@ -89,5 +89,26 @@ def main():
     print(f"\nSaved combined split manifest to: {output_path}")
 
 
+def main_yawn():
+    from frames.config import PROJECT_ROOT, load_config
+    from frames.data.manifest import build_manifest
+
+    config = load_config()
+    raw_dir = Path(config["paths"]["raw_dir"])
+    ds_config = config["yawn_dataset"]
+
+    combined = build_manifest("yawdd", raw_dir / ds_config["raw_subdir"])
+    combined = split_manifest(combined, config["split"]["ratios"], seed=config["project"]["seed"])
+    report_split(combined)
+
+    combined["filepath"] = combined["filepath"].apply(lambda p: str(Path(p).relative_to(PROJECT_ROOT)))
+
+    splits_dir = Path(config["paths"]["splits_dir"])
+    splits_dir.mkdir(parents=True, exist_ok=True)
+    output_path = splits_dir / "yawn_manifest.csv"
+    combined.to_csv(output_path, index=False)
+    print(f"\nSaved yawn split manifest to: {output_path}")
+
+
 if __name__ == "__main__":
     main()
