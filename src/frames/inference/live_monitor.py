@@ -51,14 +51,15 @@ def _draw_eye(frame, side: str, region: EyeRegion, model, image_size, class_name
     return closedness
 
 
-def _draw_mouth(frame, region: MouthRegion, mar_cfg) -> float:
+def _draw_mouth(frame, region: MouthRegion, mar_cfg, yawn_cfg) -> float:
     openness = _linear_score(region.mar, mar_cfg["closed_threshold"], mar_cfg["open_threshold"])
+    label = "yawn" if openness >= yawn_cfg["closedness_threshold"] else "no yawn"
+    color = _CLOSED_COLOR if label == "yawn" else _MOUTH_COLOR
+
     x_min, y_min, x_max, y_max = region.box
-    cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), _MOUTH_COLOR, 2)
-    cv2.putText(
-        frame, f"mouth: MAR {region.mar:.2f}", (x_min, max(y_min - 8, 12)),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.5, _MOUTH_COLOR, 2,
-    )
+    cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), color, 2)
+    text = f"mouth: {label} | MAR {region.mar:.2f}"
+    cv2.putText(frame, text, (x_min, max(y_min - 8, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     return openness
 
 
@@ -127,7 +128,7 @@ def main():
                     }
                     # average both eyes so one drooping eyelid still raises the score
                     eye_closedness = sum(closed_scores.values()) / len(closed_scores)
-                    mouth_openness = _draw_mouth(frame, regions.mouth, mar_cfg)
+                    mouth_openness = _draw_mouth(frame, regions.mouth, mar_cfg, yawn_cfg)
                 else:
                     eye_closedness = None
                     mouth_openness = None
