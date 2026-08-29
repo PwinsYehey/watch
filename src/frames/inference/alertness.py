@@ -1,4 +1,4 @@
-"""Turns per-frame eye-closedness scores into an alert/drowsy judgement via sustained-closure duration and PERCLOS."""
+"""Turns per-frame eye-closedness scores into an alert/not_alert judgement via sustained-closure duration and PERCLOS."""
 
 from collections import deque
 from dataclasses import dataclass
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AlertnessStatus:
-    state: str  # "alert", "drowsy", or "no_face"
+    state: str  # "alert", "not_alert", or "no_face"
     closed_duration: float
     perclos: float
 
@@ -18,12 +18,15 @@ class AlertnessMonitor:
         perclos_window: float,
         perclos_threshold: float,
         closedness_threshold: float,
+        dip_grace_period: float = 0.0,
     ):
         self.closed_duration_threshold = closed_duration_threshold
         self.perclos_window = perclos_window
         self.perclos_threshold = perclos_threshold
         self.closedness_threshold = closedness_threshold
+        self.dip_grace_period = dip_grace_period
         self._closed_since: float | None = None
+        self._below_since: float | None = None
         self._history: deque[tuple[float, float]] = deque()
 
     def update(self, closedness: float | None, now: float) -> AlertnessStatus:
@@ -33,10 +36,16 @@ class AlertnessMonitor:
 
         is_closed_now = closedness >= self.closedness_threshold
         if is_closed_now:
+            self._below_since = None
             if self._closed_since is None:
                 self._closed_since = now
         else:
-            self._closed_since = None
+            # a brief dip below threshold doesn't reset the streak until it
+            # outlasts dip_grace_period, tolerating natural movement mid-gesture
+            if self._below_since is None:
+                self._below_since = now
+            if now - self._below_since > self.dip_grace_period:
+                self._closed_since = None
 
         self._history.append((now, closedness))
         self._trim_history(now)
@@ -46,8 +55,8 @@ class AlertnessMonitor:
         # only trust PERCLOS once the rolling window has actually filled
         window_filled = now - self._history[0][0] >= self.perclos_window
 
-        is_drowsy = closed_duration >= self.closed_duration_threshold or (window_filled and perclos >= self.perclos_threshold)
-        return AlertnessStatus(state="drowsy" if is_drowsy else "alert", closed_duration=closed_duration, perclos=perclos)
+        is_not_alert = closed_duration >= self.closed_duration_threshold or (window_filled and perclos >= self.perclos_threshold)
+        return AlertnessStatus(state="not_alert" if is_not_alert else "alert", closed_duration=closed_duration, perclos=perclos)
 
     def _trim_history(self, now: float) -> None:
         while self._history and now - self._history[0][0] > self.perclos_window:
