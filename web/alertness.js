@@ -1,0 +1,52 @@
+// Ports src/frames/inference/alertness.py -- keep behavior identical.
+class AlertnessMonitor {
+  constructor({ closedDurationThreshold, perclosWindow, perclosThreshold, closednessThreshold, dipGracePeriod = 0.0 }) {
+    this.closedDurationThreshold = closedDurationThreshold;
+    this.perclosWindow = perclosWindow;
+    this.perclosThreshold = perclosThreshold;
+    this.closednessThreshold = closednessThreshold;
+    this.dipGracePeriod = dipGracePeriod;
+    this.closedSince = null;
+    this.belowSince = null;
+    this.history = []; // [{t, score}]
+  }
+
+  // closedness is P(closed) in [0, 1], or null when no face was detected this frame
+  update(closedness, now) {
+    if (closedness === null) {
+      return { state: "no_face", closedDuration: 0.0, perclos: this._perclos(now) };
+    }
+
+    const isClosedNow = closedness >= this.closednessThreshold;
+    if (isClosedNow) {
+      this.belowSince = null;
+      if (this.closedSince === null) this.closedSince = now;
+    } else {
+      // a brief dip below threshold doesn't reset the streak until it outlasts dipGracePeriod
+      if (this.belowSince === null) this.belowSince = now;
+      if (now - this.belowSince > this.dipGracePeriod) this.closedSince = null;
+    }
+
+    this.history.push({ t: now, score: closedness });
+    this._trimHistory(now);
+
+    const closedDuration = this.closedSince !== null ? now - this.closedSince : 0.0;
+    const perclos = this._perclos(now);
+    // only trust PERCLOS once the rolling window has actually filled
+    const windowFilled = now - this.history[0].t >= this.perclosWindow;
+
+    const isNotAlert = closedDuration >= this.closedDurationThreshold || (windowFilled && perclos >= this.perclosThreshold);
+    return { state: isNotAlert ? "not_alert" : "alert", closedDuration, perclos };
+  }
+
+  _trimHistory(now) {
+    while (this.history.length && now - this.history[0].t > this.perclosWindow) this.history.shift();
+  }
+
+  // mean closedness over the window -- a continuous average, not a binary closed/open count
+  _perclos(now) {
+    this._trimHistory(now);
+    if (!this.history.length) return 0.0;
+    return this.history.reduce((sum, h) => sum + h.score, 0) / this.history.length;
+  }
+}
