@@ -120,7 +120,7 @@ async function drawEye(side, box, ear, model, earCfg, landmarks) {
   const closedness = Math.max(earClosedness, cnnClosedness);
   const label = closedness >= 0.5 ? "closed" : "open";
 
-  const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_LEFT_EYE : FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE;
+  const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE : FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
   drawingUtils.drawConnectors(landmarks, connectors, { color: label === "open" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
   return { closedness, label, ear, cnnClosedness };
 }
