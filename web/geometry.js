@@ -62,7 +62,8 @@ function boxFromLandmarks(landmarks, ids, w, h, margin, square = false) {
 }
 
 // stands in for the Python cv2.solvePnP head-pose estimate; won't numerically match the desktop app exactly.
-function pitchFromTransformMatrix(data) {
+// returns { pitch, roll } in degrees -- forward nod and sideways tilt, each with its own threshold downstream.
+function headPoseFromTransformMatrix(data) {
   const r = [data[0], data[1], data[2], data[4], data[5], data[6], data[8], data[9], data[10]];
   const sy = Math.sqrt(r[0] * r[0] + r[3] * r[3]);
   const pitchRad = sy < 1e-6 ? Math.atan2(-r[5], r[4]) : Math.atan2(r[7], r[8]);
@@ -70,5 +71,11 @@ function pitchFromTransformMatrix(data) {
   // MediaPipe's own matrix already reads near 0 for a neutral head, unlike solvePnP's near-180 convention -- just normalize to (-180, 180]
   const normalized = ((rawPitchDeg + 180) % 360) - 180;
   // this axis reads opposite the config's convention (nodding forward should increase the value, toward drooped_threshold)
-  return -normalized;
+  const pitch = -normalized;
+
+  // unlike pitch, roll already reads near 0 for a neutral head -- no wraparound remap needed
+  const rollRad = Math.atan2(r[3], r[0]);
+  const roll = Math.abs((rollRad * 180) / Math.PI);
+
+  return { pitch, roll };
 }

@@ -52,6 +52,7 @@ class FaceRegions:
     eyes: dict[str, EyeRegion]
     mouth: MouthRegion
     pitch: float | None
+    roll: float | None
     landmarks: object
 
 
@@ -106,8 +107,8 @@ def _eye_aspect_ratio(landmarks, w: int, h: int, ear_points: dict) -> float:
     return (vertical_a + vertical_b) / (2.0 * horizontal)
 
 
-def _head_pitch(landmarks, w: int, h: int) -> float | None:
-    """Head pitch in degrees via solvePnP, re-centered so a frontal/neutral head reads near 0 instead of near +-180."""
+def _head_pose(landmarks, w: int, h: int) -> tuple[float, float] | None:
+    """Head pitch (forward nod) and roll (sideways tilt) in degrees via solvePnP, or None if the pose couldn't be estimated."""
     image_points = np.array([_point(landmarks, i, w, h) for i in _HEAD_POSE_IDS], dtype=np.float64)
     focal_length = w
     camera_matrix = np.array(
@@ -122,7 +123,10 @@ def _head_pitch(landmarks, w: int, h: int) -> float | None:
     rmat, _ = cv2.Rodrigues(rvec)
     angles, *_ = cv2.RQDecomp3x3(rmat)
     raw_pitch = float(angles[0])
-    return ((raw_pitch + 360.0) % 360.0) - 180.0
+    # solvePnP's pitch reads near +-180 for a neutral head; roll has no such offset and reads near 0 already
+    pitch = ((raw_pitch + 360.0) % 360.0) - 180.0
+    roll = abs(float(angles[2]))
+    return pitch, roll
 
 
 def _mouth_aspect_ratio(landmarks, w: int, h: int) -> float:
@@ -173,7 +177,8 @@ class EyeRegionTracker:
         left_ear = _eye_aspect_ratio(landmarks, w, h, _LEFT_EYE_EAR_POINTS)
         right_ear = _eye_aspect_ratio(landmarks, w, h, _RIGHT_EYE_EAR_POINTS)
         mar = _mouth_aspect_ratio(landmarks, w, h)
-        pitch = _head_pitch(landmarks, w, h)
+        pose = _head_pose(landmarks, w, h)
+        pitch, roll = pose if pose is not None else (None, None)
 
         return FaceRegions(
             eyes={
@@ -182,6 +187,7 @@ class EyeRegionTracker:
             },
             mouth=MouthRegion(crop=mouth_crop, box=mouth_box, mar=mar),
             pitch=pitch,
+            roll=roll,
             landmarks=landmarks,
         )
 

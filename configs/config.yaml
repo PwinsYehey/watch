@@ -108,9 +108,12 @@ yawn:
   dip_grace_period_sec: 0.5
 
 head_pose:
-  # Head pitch (degrees) thresholds, calibrated from observed neutral (~5deg) and nodding (~20deg) values.
+  # Forward-nod pitch thresholds, calibrated from observed neutral (~5deg) and nodding (~20deg) values.
   upright_threshold: 8
   drooped_threshold: 20
+  # Sideways-tilt roll thresholds -- drooped is set near where the head nearly touches the shoulder.
+  roll_upright_threshold: 15
+  roll_drooped_threshold: 45
 
 nod:
   # Sustained head-droop duration counts as nodding off; no dip_grace_period, unlike yawn.

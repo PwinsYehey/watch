@@ -115,13 +115,16 @@ def _draw_mouth(frame, region: MouthRegion, landmarks, yawn_model, image_size, y
     return {"openness": openness, "label": label, "mar": region.mar}
 
 
-def _head_pose_status(frame, pitch: float | None, landmarks, head_pose_cfg) -> dict | None:
-    if pitch is None:
+def _head_pose_status(frame, pitch: float | None, roll: float | None, landmarks, head_pose_cfg) -> dict | None:
+    if pitch is None or roll is None:
         return None
-    droop = _linear_score(pitch, head_pose_cfg["upright_threshold"], head_pose_cfg["drooped_threshold"])
+    pitch_droop = _linear_score(pitch, head_pose_cfg["upright_threshold"], head_pose_cfg["drooped_threshold"])
+    roll_droop = _linear_score(roll, head_pose_cfg["roll_upright_threshold"], head_pose_cfg["roll_drooped_threshold"])
+    # either a forward nod or a sideways tilt toward the shoulder counts as drooping
+    droop = max(pitch_droop, roll_droop)
     label = "nodding" if droop >= 0.5 else "upright"
     _draw_contour(frame, landmarks, _FACE_OVAL_CONNECTIONS, _HEAD_COLOR if label == "upright" else _CLOSED_COLOR)
-    return {"droop": droop, "label": label, "pitch": pitch}
+    return {"droop": droop, "label": label, "pitch": pitch, "roll": roll}
 
 
 def _draw_banner(frame, state: str, eye_status, yawn_status, nod_status):
@@ -148,7 +151,7 @@ def _draw_status_panel(frame, left: dict | None, right: dict | None, mouth: dict
     if mouth:
         lines.append((f"mouth: {mouth['label']} {mouth['openness'] * 100:.0f}% | MAR {mouth['mar']:.2f}", _CLOSED_COLOR if mouth["label"] == "yawn" else _MOUTH_COLOR))
     if head:
-        lines.append((f"head: {head['label']} | pitch {head['pitch']:.1f} deg", _HEAD_COLOR if head["label"] == "upright" else _CLOSED_COLOR))
+        lines.append((f"head: {head['label']} | pitch {head['pitch']:.1f} | roll {head['roll']:.1f} deg", _HEAD_COLOR if head["label"] == "upright" else _CLOSED_COLOR))
     if not lines:
         return
 
@@ -233,7 +236,7 @@ def main():
                     eye_closedness = sum(r["closedness"] for r in eye_results.values()) / len(eye_results)
                     mouth_result = _draw_mouth(frame, regions.mouth, regions.landmarks, yawn_model, image_size, yawn_class_names, mar_cfg)
                     mouth_openness = mouth_result["openness"]
-                    head_result = _head_pose_status(frame, regions.pitch, regions.landmarks, head_pose_cfg)
+                    head_result = _head_pose_status(frame, regions.pitch, regions.roll, regions.landmarks, head_pose_cfg)
                     head_droop = head_result["droop"] if head_result else None
                     _draw_status_panel(frame, eye_results.get("left"), eye_results.get("right"), mouth_result, head_result)
                 else:

@@ -9,6 +9,6 @@ const CONFIG = {
   calibration: { durationSec: 4.0, closedOffset: 0.10 },
   mar: { closedThreshold: 0.3, openThreshold: 0.6 },
   yawn: { closedDurationThresholdSec: 3.0, perclosWindowSec: 8.0, perclosThreshold: 0.8, closednessThreshold: 0.5, dipGracePeriodSec: 0.5 },
-  headPose: { uprightThreshold: 8, droopedThreshold: 20 },
+  headPose: { uprightThreshold: 8, droopedThreshold: 20, rollUprightThreshold: 15, rollDroopedThreshold: 45 },
   nod: { closedDurationThresholdSec: 2.0, perclosWindowSec: 6.0, perclosThreshold: 0.6, closednessThreshold: 0.5, dipGracePeriodSec: 0.0 },
 };

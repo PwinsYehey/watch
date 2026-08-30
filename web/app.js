@@ -136,12 +136,15 @@ async function drawMouth(box, mar, model, landmarks) {
   return { openness, label, mar };
 }
 
-function headPoseStatus(pitch, landmarks) {
-  if (pitch === null) return null;
-  const droop = linearScore(pitch, CONFIG.headPose.uprightThreshold, CONFIG.headPose.droopedThreshold);
+function headPoseStatus(pitch, roll, landmarks) {
+  if (pitch === null || roll === null) return null;
+  const pitchDroop = linearScore(pitch, CONFIG.headPose.uprightThreshold, CONFIG.headPose.droopedThreshold);
+  const rollDroop = linearScore(roll, CONFIG.headPose.rollUprightThreshold, CONFIG.headPose.rollDroopedThreshold);
+  // either a forward nod or a sideways tilt toward the shoulder counts as drooping
+  const droop = Math.max(pitchDroop, rollDroop);
   const label = droop >= 0.5 ? "nodding" : "upright";
   drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
-  return { droop, label, pitch };
+  return { droop, label, pitch, roll };
 }
 
 function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
@@ -164,7 +167,7 @@ function drawStatusPanel(left, right, mouth, head) {
     left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
     right && { text: `right eye: ${right.label} ${Math.round(right.closedness * 100)}% | EAR ${right.ear.toFixed(2)}`, color: right.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
     mouth && { text: `mouth: ${mouth.label} ${Math.round(mouth.openness * 100)}% | MAR ${mouth.mar.toFixed(2)}`, color: mouth.label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR },
-    head && { text: `head: ${head.label} | pitch ${head.pitch.toFixed(1)} deg`, color: head.label === "upright" ? HEAD_COLOR : CLOSED_COLOR },
+    head && { text: `head: ${head.label} | pitch ${head.pitch.toFixed(1)} | roll ${head.roll.toFixed(1)} deg`, color: head.label === "upright" ? HEAD_COLOR : CLOSED_COLOR },
   ].filter(Boolean);
   if (!lines.length) return;
 
@@ -341,7 +344,8 @@ async function main() {
           mouthResult = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
           mouthOpenness = mouthResult.openness;
           if (result.facialTransformationMatrixes.length) {
-            headResult = headPoseStatus(pitchFromTransformMatrix(result.facialTransformationMatrixes[0].data), lm);
+            const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+            headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
             headDroop = headResult?.droop ?? null;
           }
         }
