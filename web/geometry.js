@@ -1,8 +1,8 @@
 // Ports src/frames/preprocessing/facemesh.py -- same MediaPipe FaceMesh landmark topology, so the indices match exactly.
-const LEFT_EYE_EAR_POINTS = { horizontal: [33, 133], verticalA: [160, 144], verticalB: [158, 153] };
-const RIGHT_EYE_EAR_POINTS = { horizontal: [362, 263], verticalA: [385, 380], verticalB: [387, 373] };
-const LEFT_EYE_IDS = [33, 133, 159, 145, 160, 144, 158, 153];
-const RIGHT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373];
+const LEFT_EYE_EAR_POINTS = { horizontal: [362, 263], verticalA: [385, 380], verticalB: [387, 373] };
+const RIGHT_EYE_EAR_POINTS = { horizontal: [33, 133], verticalA: [160, 144], verticalB: [158, 153] };
+const LEFT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373];
+const RIGHT_EYE_IDS = [33, 133, 159, 145, 160, 144, 158, 153];
 const MOUTH_IDS = [61, 291, 13, 14, 78, 308, 0, 17];
 const MOUTH_MAR_POINTS = { horizontal: [61, 291], vertical: [13, 14] };
 

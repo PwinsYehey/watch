@@ -7,12 +7,12 @@ import numpy as np
 _mp_face_mesh = mp.solutions.face_mesh
 
 # Landmark indices bounding each eye region (MediaPipe FaceMesh topology).
-_LEFT_EYE_IDS = [33, 133, 159, 145, 160, 144, 158, 153]
-_RIGHT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373]
+_LEFT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373]
+_RIGHT_EYE_IDS = [33, 133, 159, 145, 160, 144, 158, 153]
 
 # The same eye landmarks organized into the classic 6-point EAR layout (Soukupova & Cech).
-_LEFT_EYE_EAR_POINTS = {"horizontal": (33, 133), "vertical_a": (160, 144), "vertical_b": (158, 153)}
-_RIGHT_EYE_EAR_POINTS = {"horizontal": (362, 263), "vertical_a": (385, 380), "vertical_b": (387, 373)}
+_LEFT_EYE_EAR_POINTS = {"horizontal": (362, 263), "vertical_a": (385, 380), "vertical_b": (387, 373)}
+_RIGHT_EYE_EAR_POINTS = {"horizontal": (33, 133), "vertical_a": (160, 144), "vertical_b": (158, 153)}
 
 # Landmark indices bounding the mouth region, and the MAR layout.
 _MOUTH_IDS = [61, 291, 13, 14, 78, 308, 0, 17]
