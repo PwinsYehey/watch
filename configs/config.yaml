@@ -81,7 +81,7 @@ alertness:
   # Turns per-frame eye-closedness into a live alert/not_alert judgement.
   closed_duration_threshold_sec: 1.5
   perclos_window_sec: 5.0
-  perclos_threshold: 0.5
+  perclos_threshold: 0.75
   closedness_threshold: 0.85
 
 ear:
@@ -92,7 +92,7 @@ ear:
 calibration:
   # live.py measures each user's own open-eye EAR at startup so the threshold fits their eye shape.
   duration_sec: 4.0
-  closed_fraction: 0.3
+  closed_offset: 0.10
 
 mar:
   # Mouth Aspect Ratio thresholds -- 0.6 also marks the yawn cutoff used when filtering YawDD frames.

@@ -5,7 +5,7 @@ import cv2
 import mediapipe as mp
 
 from frames.config import load_config
-from frames.inference.alertness import AlertnessMonitor
+from frames.inference.alertness import AlertnessMonitor, RollingMedian
 from frames.inference.predict import predict_eye_state, predict_yawn_state
 from frames.models.build_model import load_trained_model
 from frames.preprocessing.facemesh import EyeRegion, EyeRegionTracker, MouthRegion
@@ -55,7 +55,7 @@ def _build_monitor(cfg: dict) -> AlertnessMonitor:
     )
 
 
-def _calibrate_ear(cap, tracker, duration_sec: float, closed_fraction: float) -> dict | None:
+def _calibrate_ear(cap, tracker, duration_sec: float, closed_offset: float) -> dict | None:
     """Measures this user's own open-eye EAR for a few seconds so thresholds fit their eye shape, not a population average."""
     samples = []
     start = time.time()
@@ -78,7 +78,7 @@ def _calibrate_ear(cap, tracker, duration_sec: float, closed_fraction: float) ->
         return None
 
     baseline = statistics.median(samples)
-    return {"open_threshold": baseline, "closed_threshold": baseline * closed_fraction}
+    return {"open_threshold": baseline, "closed_threshold": baseline - closed_offset}
 
 
 def _draw_contour(frame, landmarks, connections, color):
@@ -96,7 +96,6 @@ def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size,
     ear_closedness = _linear_score(region.ear, ear_cfg["open_threshold"], ear_cfg["closed_threshold"])
     # the CNN can raise closedness when EAR is ambiguous, but can't override a clearly-open EAR reading
     closedness = max(cnn_closedness, ear_closedness) if ear_closedness > 0 else 0.0
-    # the displayed label always matches this combined score, not just the CNN's own opinion
     label = "closed" if closedness >= 0.5 else "open"
 
     connections = _LEFT_EYE_CONNECTIONS if side == "left" else _RIGHT_EYE_CONNECTIONS
@@ -181,6 +180,10 @@ def main():
     yawn_monitor = _build_monitor(yawn_cfg)
     nod_monitor = _build_monitor(nod_cfg)
 
+    eye_smoother = RollingMedian(5)
+    mouth_smoother = RollingMedian(5)
+    head_smoother = RollingMedian(5)
+
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FPS, 30)
     if not cap.isOpened():
@@ -190,7 +193,7 @@ def main():
 
     def run_calibration():
         nonlocal ear_cfg
-        calibrated = _calibrate_ear(cap, tracker, calibration_cfg["duration_sec"], calibration_cfg["closed_fraction"])
+        calibrated = _calibrate_ear(cap, tracker, calibration_cfg["duration_sec"], calibration_cfg["closed_offset"])
         if calibrated is not None:
             ear_cfg = calibrated
             print(f"Calibrated EAR thresholds: open>={ear_cfg['open_threshold']:.2f}, closed<={ear_cfg['closed_threshold']:.2f}")
@@ -239,9 +242,9 @@ def main():
                     head_droop = None
 
                 now = time.time()
-                eye_status = eye_monitor.update(eye_closedness, now)
-                yawn_status = yawn_monitor.update(mouth_openness, now)
-                nod_status = nod_monitor.update(head_droop, now)
+                eye_status = eye_monitor.update(eye_smoother.add(eye_closedness), now)
+                yawn_status = yawn_monitor.update(mouth_smoother.add(mouth_openness), now)
+                nod_status = nod_monitor.update(head_smoother.add(head_droop), now)
 
                 if eye_status.state == "no_face":
                     overall_state = "no_face"

@@ -1,4 +1,21 @@
 // Ports src/frames/inference/alertness.py -- keep behavior identical.
+
+class RollingMedian {
+  constructor(size) {
+    this.size = size;
+    this.values = [];
+  }
+
+  add(value) {
+    if (value === null) return null;
+    this.values.push(value);
+    if (this.values.length > this.size) this.values.shift();
+    const sorted = [...this.values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+}
+
 class AlertnessMonitor {
   constructor({ closedDurationThreshold, perclosWindow, perclosThreshold, closednessThreshold, dipGracePeriod = 0.0 }) {
     this.closedDurationThreshold = closedDurationThreshold;

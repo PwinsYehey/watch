@@ -172,7 +172,7 @@ function drawStatusPanel(left, right, mouth, head) {
   });
 }
 
-async function calibrateEar(faceLandmarker, durationSec, closedFraction) {
+async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
   const samples = [];
   const start = performance.now();
   while (performance.now() - start < durationSec * 1000) {
@@ -195,7 +195,7 @@ async function calibrateEar(faceLandmarker, durationSec, closedFraction) {
 
   if (samples.length < 10) return null;
   const baseline = median(samples);
-  return { openThreshold: baseline, closedThreshold: baseline * closedFraction };
+  return { openThreshold: baseline, closedThreshold: baseline - closedOffset };
 }
 
 async function main() {
@@ -249,7 +249,7 @@ async function main() {
     // pause the main render loop so it doesn't fight the calibration overlay for the same canvas
     paused = true;
     stopAlarm();
-    const calibrated = await calibrateEar(faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedFraction);
+    const calibrated = await calibrateEar(faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset);
     if (calibrated) {
       earCfg = calibrated;
       statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
@@ -261,6 +261,10 @@ async function main() {
 
   await runCalibration();
   muteBtn.style.display = "inline-block";
+
+  const eyeSmoother = new RollingMedian(5);
+  const mouthSmoother = new RollingMedian(5);
+  const headSmoother = new RollingMedian(5);
 
   const eyeMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -339,9 +343,9 @@ async function main() {
       drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
 
       const now = performance.now() / 1000;
-      const eyeStatus = eyeMonitor.update(eyeClosedness, now);
-      const yawnStatus = yawnMonitor.update(mouthOpenness, now);
-      const nodStatus = nodMonitor.update(headDroop, now);
+      const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
+      const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
+      const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
 
       let overallState;
       if (eyeStatus.state === "no_face") overallState = "no_face";

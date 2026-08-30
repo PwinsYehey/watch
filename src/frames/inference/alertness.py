@@ -1,3 +1,4 @@
+import statistics
 from collections import deque
 from dataclasses import dataclass
 
@@ -7,6 +8,19 @@ class AlertnessStatus:
     state: str  # "alert", "not_alert", or "no_face"
     closed_duration: float
     perclos: float
+
+
+class RollingMedian:
+    """Smooths out a noisy per-frame CNN score so a single bad frame can't sway the sustained-duration or PERCLOS checks."""
+
+    def __init__(self, size: int):
+        self._values: deque[float] = deque(maxlen=size)
+
+    def add(self, value: float | None) -> float | None:
+        if value is None:
+            return None
+        self._values.append(value)
+        return statistics.median(self._values)
 
 
 class AlertnessMonitor:
