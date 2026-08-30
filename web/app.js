@@ -1,11 +1,13 @@
 // Ports src/frames/inference/live_monitor.py to the browser using MediaPipe Tasks Vision + TensorFlow.js.
-import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const video = document.getElementById("video");
 const canvas = document.getElementById("output");
 const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
+const recalibrateBtn = document.getElementById("recalibrateBtn");
+const muteBtn = document.getElementById("muteBtn");
 
 const OPEN_COLOR = "#00c800";
 const CLOSED_COLOR = "#dc0000";
@@ -31,9 +33,10 @@ let audioCtx = null;
 let alarmOscillator = null;
 let alarmGain = null;
 let alarmPulseTimer = null;
+let muted = false;
 
 function startAlarm() {
-  if (alarmOscillator) return;
+  if (muted || alarmOscillator) return;
   audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
   alarmOscillator = audioCtx.createOscillator();
   alarmGain = audioCtx.createGain();
@@ -87,48 +90,37 @@ async function predictClassState(model, sourceCanvas, box, classNames, positiveC
   };
 }
 
-async function drawEye(side, box, ear, model, earCfg) {
+let drawingUtils = null;
+
+async function drawEye(side, box, ear, model, earCfg, landmarks) {
   const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed");
   const earClosedness = linearScore(ear, earCfg.openThreshold, earCfg.closedThreshold);
   // the CNN can raise closedness when EAR is ambiguous, but can't override a clearly-open EAR reading
   const closedness = earClosedness > 0 ? Math.max(cnnClosedness, earClosedness) : 0.0;
   const label = closedness >= 0.5 ? "closed" : "open";
 
-  const color = label === "open" ? OPEN_COLOR : CLOSED_COLOR;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(box.xMin, box.yMin, box.xMax - box.xMin, box.yMax - box.yMin);
-  ctx.fillStyle = color;
-  ctx.font = "11px sans-serif";
-  ctx.fillText(`${side}: ${label} ${Math.round(closedness * 100)}% | EAR ${ear.toFixed(2)}`, box.xMin, Math.max(box.yMin - 8, 12));
-  return closedness;
+  const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_LEFT_EYE : FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE;
+  drawingUtils.drawConnectors(landmarks, connectors, { color: label === "open" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
+  return { closedness, label, ear };
 }
 
-async function drawMouth(box, mar, model) {
+async function drawMouth(box, mar, model, landmarks) {
   const { positiveProbability: cnnOpenness } = await predictClassState(model, canvas, box, CONFIG.yawnClassNames, "yawn");
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
   // either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
   const openness = Math.max(cnnOpenness, marOpenness);
   const label = openness >= 0.5 ? "yawn" : "no yawn";
 
-  const color = label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(box.xMin, box.yMin, box.xMax - box.xMin, box.yMax - box.yMin);
-  ctx.fillStyle = color;
-  ctx.font = "11px sans-serif";
-  ctx.fillText(`mouth: ${label} ${Math.round(openness * 100)}% | MAR ${mar.toFixed(2)}`, box.xMin, Math.max(box.yMin - 8, 12));
-  return openness;
+  drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LIPS, { color: label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR, lineWidth: 2 });
+  return { openness, label, mar };
 }
 
-function drawHeadPose(pitch) {
+function headPoseStatus(pitch, landmarks) {
   if (pitch === null) return null;
   const droop = linearScore(pitch, CONFIG.headPose.uprightThreshold, CONFIG.headPose.droopedThreshold);
   const label = droop >= 0.5 ? "nodding" : "upright";
-  ctx.fillStyle = label === "upright" ? HEAD_COLOR : CLOSED_COLOR;
-  ctx.font = "11px sans-serif";
-  ctx.fillText(`head: ${label} | pitch ${pitch.toFixed(1)} deg`, 20, 100);
-  return droop;
+  drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
+  return { droop, label, pitch };
 }
 
 function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
@@ -143,6 +135,26 @@ function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
     20,
     70
   );
+}
+
+// a single fixed panel for all per-cue readouts, so labels never overlap regardless of face size/position
+function drawStatusPanel(left, right, mouth, head) {
+  const lines = [
+    left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
+    right && { text: `right eye: ${right.label} ${Math.round(right.closedness * 100)}% | EAR ${right.ear.toFixed(2)}`, color: right.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
+    mouth && { text: `mouth: ${mouth.label} ${Math.round(mouth.openness * 100)}% | MAR ${mouth.mar.toFixed(2)}`, color: mouth.label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR },
+    head && { text: `head: ${head.label} | pitch ${head.pitch.toFixed(1)} deg`, color: head.label === "upright" ? HEAD_COLOR : CLOSED_COLOR },
+  ].filter(Boolean);
+  if (!lines.length) return;
+
+  const panelY = 88;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.fillRect(10, panelY, 260, lines.length * 18 + 10);
+  ctx.font = "11px sans-serif";
+  lines.forEach((line, i) => {
+    ctx.fillStyle = line.color;
+    ctx.fillText(line.text, 18, panelY + 18 * (i + 1));
+  });
 }
 
 async function calibrateEar(faceLandmarker, durationSec, closedFraction) {
@@ -209,13 +221,28 @@ async function main() {
 
   statusEl.textContent = "";
   let earCfg = CONFIG.ear;
-  const calibrated = await calibrateEar(faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedFraction);
-  if (calibrated) {
-    earCfg = calibrated;
-    statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
-  } else {
-    statusEl.textContent = "Calibration failed (no face detected) -- using default EAR thresholds.";
+  let paused = false;
+
+  async function runCalibration() {
+    // pause the main render loop so it doesn't fight the calibration overlay for the same canvas
+    paused = true;
+    stopAlarm();
+    recalibrateBtn.disabled = true;
+    const calibrated = await calibrateEar(faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedFraction);
+    if (calibrated) {
+      earCfg = calibrated;
+      statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
+    } else {
+      statusEl.textContent = "Calibration failed (no face detected) -- using default EAR thresholds.";
+    }
+    recalibrateBtn.disabled = false;
+    paused = false;
   }
+
+  await runCalibration();
+  recalibrateBtn.style.display = "inline-block";
+  muteBtn.style.display = "inline-block";
+  recalibrateBtn.addEventListener("click", runCalibration);
 
   const eyeMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -238,13 +265,19 @@ async function main() {
     dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
   });
 
+  drawingUtils = new DrawingUtils(ctx);
   let prevTime = performance.now();
 
   async function frame() {
+    if (paused) {
+      requestAnimationFrame(frame);
+      return;
+    }
     const result = faceLandmarker.detectForVideo(video, performance.now());
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     let eyeClosedness = null, mouthOpenness = null, headDroop = null;
+    let leftResult = null, rightResult = null, mouthResult = null, headResult = null;
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
       const w = canvas.width, h = canvas.height;
@@ -256,16 +289,19 @@ async function main() {
       const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
       if (leftBox && rightBox && mouthBox) {
-        const leftClosedness = await drawEye("left", leftBox, leftEar, eyeModel, earCfg);
-        const rightClosedness = await drawEye("right", rightBox, rightEar, eyeModel, earCfg);
+        leftResult = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
+        rightResult = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
         // average both eyes so one drooping eyelid still raises the score
-        eyeClosedness = (leftClosedness + rightClosedness) / 2;
-        mouthOpenness = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel);
+        eyeClosedness = (leftResult.closedness + rightResult.closedness) / 2;
+        mouthResult = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
+        mouthOpenness = mouthResult.openness;
         if (result.facialTransformationMatrixes.length) {
-          headDroop = drawHeadPose(pitchFromTransformMatrix(result.facialTransformationMatrixes[0].data));
+          headResult = headPoseStatus(pitchFromTransformMatrix(result.facialTransformationMatrixes[0].data), lm);
+          headDroop = headResult?.droop ?? null;
         }
       }
     }
+    drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
 
     const now = performance.now() / 1000;
     const eyeStatus = eyeMonitor.update(eyeClosedness, now);
@@ -302,4 +338,10 @@ startBtn.addEventListener("click", () => {
     statusEl.textContent = `Error: ${err.message}`;
     console.error(err);
   });
+});
+
+muteBtn.addEventListener("click", () => {
+  muted = !muted;
+  muteBtn.textContent = muted ? "Unmute Alarm" : "Mute Alarm";
+  if (muted) stopAlarm();
 });
