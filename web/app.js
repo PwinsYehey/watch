@@ -1,12 +1,14 @@
 // Ports src/frames/inference/live_monitor.py to the browser using MediaPipe Tasks Vision + TensorFlow.js.
 import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
+// a real gap this long (not just a blink or a momentary tracking miss) means the driver likely changed
+const NO_FACE_RECALIBRATE_GAP_MS = 3000;
+
 const video = document.getElementById("video");
 const canvas = document.getElementById("output");
 const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
-const recalibrateBtn = document.getElementById("recalibrateBtn");
 const muteBtn = document.getElementById("muteBtn");
 
 const OPEN_COLOR = "#00c800";
@@ -222,12 +224,12 @@ async function main() {
   statusEl.textContent = "";
   let earCfg = CONFIG.ear;
   let paused = false;
+  let noFaceSince = null;
 
   async function runCalibration() {
     // pause the main render loop so it doesn't fight the calibration overlay for the same canvas
     paused = true;
     stopAlarm();
-    recalibrateBtn.disabled = true;
     const calibrated = await calibrateEar(faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedFraction);
     if (calibrated) {
       earCfg = calibrated;
@@ -235,14 +237,11 @@ async function main() {
     } else {
       statusEl.textContent = "Calibration failed (no face detected) -- using default EAR thresholds.";
     }
-    recalibrateBtn.disabled = false;
     paused = false;
   }
 
   await runCalibration();
-  recalibrateBtn.style.display = "inline-block";
   muteBtn.style.display = "inline-block";
-  recalibrateBtn.addEventListener("click", runCalibration);
 
   const eyeMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -274,6 +273,21 @@ async function main() {
       return;
     }
     const result = faceLandmarker.detectForVideo(video, performance.now());
+    const faceFound = result.faceLandmarks.length > 0;
+
+    if (!faceFound) {
+      if (noFaceSince === null) noFaceSince = performance.now();
+    } else if (noFaceSince !== null) {
+      // a face reappearing after a real gap likely means a new driver, so recalibrate for them automatically
+      const gap = performance.now() - noFaceSince;
+      noFaceSince = null;
+      if (gap >= NO_FACE_RECALIBRATE_GAP_MS) {
+        await runCalibration();
+        requestAnimationFrame(frame);
+        return;
+      }
+    }
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     let eyeClosedness = null, mouthOpenness = null, headDroop = null;

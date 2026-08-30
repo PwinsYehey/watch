@@ -12,8 +12,8 @@
     video { display: none; }
     canvas { max-width: 100%; border: 1px solid #333; }
     #status { margin-top: 10px; color: #0cf; min-height: 20px; }
-    #startBtn, #recalibrateBtn, #muteBtn { margin-top: 10px; padding: 10px 24px; font-size: 15px; cursor: pointer; }
-    #recalibrateBtn, #muteBtn { display: none; margin-left: 8px; }
+    #startBtn, #muteBtn { margin-top: 10px; padding: 10px 24px; font-size: 15px; cursor: pointer; }
+    #muteBtn { display: none; margin-left: 8px; }
     footer { margin-top: 30px; font-size: 12px; color: #555; }
   </style>
 </head>
@@ -27,7 +27,6 @@
   </div>
   <div>
     <button id="startBtn">Start</button>
-    <button id="recalibrateBtn">Recalibrate</button>
     <button id="muteBtn">Mute Alarm</button>
   </div>
   <div id="status"></div>
@@ -37,7 +36,7 @@
   <script src="config.js?v=9"></script>
   <script src="geometry.js?v=9"></script>
   <script src="alertness.js?v=9"></script>
-  <script type="module" src="app.js?v=11"></script>
+  <script type="module" src="app.js?v=13"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>
