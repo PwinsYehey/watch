@@ -54,7 +54,7 @@ class FaceRegions:
     pitch: float | None
 
 
-def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float = 0.6):
+def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float):
     """Returns (crop, (x_min, y_min, x_max, y_max)), or None if the box is degenerate."""
     h, w = image.shape[:2]
     xs = [landmarks[i].x * w for i in ids]
@@ -147,8 +147,8 @@ class EyeRegionTracker:
             return None
 
         landmarks = results.multi_face_landmarks[0].landmark
-        left = _crop_from_landmarks(image_bgr, landmarks, _LEFT_EYE_IDS)
-        right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS)
+        left = _crop_from_landmarks(image_bgr, landmarks, _LEFT_EYE_IDS, margin=0.15)
+        right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS, margin=0.15)
         mouth = _crop_from_landmarks(image_bgr, landmarks, _MOUTH_IDS, margin=0.3)
 
         if left is None or right is None or mouth is None:
