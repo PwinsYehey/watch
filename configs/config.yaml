@@ -82,7 +82,7 @@ alertness:
   closed_duration_threshold_sec: 1.5
   perclos_window_sec: 5.0
   perclos_threshold: 0.5
-  closedness_threshold: 0.4
+  closedness_threshold: 0.85
 
 ear:
   # Fallback thresholds used only if live per-user calibration fails.
