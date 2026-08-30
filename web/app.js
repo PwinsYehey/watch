@@ -108,15 +108,14 @@ async function predictClassState(model, sourceCanvas, box, classNames, positiveC
 let drawingUtils = null;
 
 async function drawEye(side, box, ear, model, earCfg, landmarks) {
+  // kept for display/logging only -- the open/closed decision below is EAR-only, a hard cutoff at the calibrated threshold
   const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed");
-  const earClosedness = linearScore(ear, earCfg.openThreshold, earCfg.closedThreshold);
-  // the CNN can raise closedness when EAR is ambiguous, but can't override a clearly-open EAR reading
-  const closedness = earClosedness > 0 ? Math.max(cnnClosedness, earClosedness) : 0.0;
+  const closedness = ear <= earCfg.closedThreshold ? 1.0 : 0.0;
   const label = closedness >= 0.5 ? "closed" : "open";
 
   const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_LEFT_EYE : FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE;
   drawingUtils.drawConnectors(landmarks, connectors, { color: label === "open" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
-  return { closedness, label, ear };
+  return { closedness, label, ear, cnnClosedness };
 }
 
 async function drawMouth(box, mar, model, landmarks) {

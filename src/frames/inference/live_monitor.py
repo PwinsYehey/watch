@@ -92,15 +92,14 @@ def _draw_contour(frame, landmarks, connections, color):
 
 
 def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg) -> dict:
+    # kept for display/logging only -- the open/closed decision below is EAR-only, a hard cutoff at the calibrated threshold
     _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
-    ear_closedness = _linear_score(region.ear, ear_cfg["open_threshold"], ear_cfg["closed_threshold"])
-    # the CNN can raise closedness when EAR is ambiguous, but can't override a clearly-open EAR reading
-    closedness = max(cnn_closedness, ear_closedness) if ear_closedness > 0 else 0.0
+    closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
     label = "closed" if closedness >= 0.5 else "open"
 
     connections = _LEFT_EYE_CONNECTIONS if side == "left" else _RIGHT_EYE_CONNECTIONS
     _draw_contour(frame, landmarks, connections, _OPEN_COLOR if label == "open" else _CLOSED_COLOR)
-    return {"closedness": closedness, "label": label, "ear": region.ear}
+    return {"closedness": closedness, "label": label, "ear": region.ear, "cnn_closedness": cnn_closedness}
 
 
 def _draw_mouth(frame, region: MouthRegion, landmarks, yawn_model, image_size, yawn_class_names, mar_cfg) -> dict:
