@@ -101,10 +101,32 @@ def build_yawdd_manifest(raw_dir: str | Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_nthu_eye_manifest(raw_dir: str | Path) -> pd.DataFrame:
+    """Parses '<subjectId>_<glasses>_<scenario>_<frameIdx>_<side>.jpg', eye crops extracted via cli/extract_nthu.py from the real NTHU-DDD subject ids."""
+    root = Path(raw_dir)
+    rows = []
+
+    for label, subdir in [("open", "open"), ("closed", "closed")]:
+        for path in sorted((root / subdir).glob("*.jpg")):
+            subject_id, glasses = path.stem.split("_")[0], path.stem.split("_")[1]
+            rows.append(
+                {
+                    "filepath": str(path),
+                    "dataset": "nthu_eye",
+                    "subject_id": subject_id,
+                    "label": label,
+                    "glasses": glasses,
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
 BUILDERS = {
     "mrl_eye": build_mrl_eye_manifest,
     "cew": build_cew_manifest,
     "yawdd": build_yawdd_manifest,
+    "nthu_eye": build_nthu_eye_manifest,
 }
 
 
