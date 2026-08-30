@@ -92,9 +92,10 @@ def _draw_contour(frame, landmarks, connections, color):
 
 
 def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg) -> dict:
-    # kept for display/logging only -- the open/closed decision below is EAR-only, a hard cutoff at the calibrated threshold
     _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
-    closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
+    ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
+    # no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
+    closedness = max(ear_closedness, cnn_closedness)
     label = "closed" if closedness >= 0.5 else "open"
 
     connections = _LEFT_EYE_CONNECTIONS if side == "left" else _RIGHT_EYE_CONNECTIONS

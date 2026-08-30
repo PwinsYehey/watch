@@ -8,9 +8,12 @@ from frames.models.build_model import load_trained_model
 from frames.preprocessing.facemesh import extract_face_regions
 
 
-def _predict_class_state(model, crop_bgr: np.ndarray, image_size: tuple, class_names: list[str], positive_class: str):
+def _predict_class_state(model, crop_bgr: np.ndarray, image_size: tuple, class_names: list[str], positive_class: str, desaturate: bool = False):
     """Returns (label, confidence, positive_class_probability), the raw softmax score for `positive_class`."""
     resized = cv2.resize(crop_bgr, image_size)
+    if desaturate:
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        resized = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) / 255.0
     batch = np.expand_dims(rgb, axis=0)
 
@@ -22,7 +25,8 @@ def _predict_class_state(model, crop_bgr: np.ndarray, image_size: tuple, class_n
 
 
 def predict_eye_state(model, eye_crop_bgr: np.ndarray, image_size: tuple, class_names: list[str]):
-    return _predict_class_state(model, eye_crop_bgr, image_size, class_names, positive_class="closed")
+    # desaturate first -- the eye CNN's training data is almost entirely near-grayscale
+    return _predict_class_state(model, eye_crop_bgr, image_size, class_names, positive_class="closed", desaturate=True)
 
 
 def predict_yawn_state(model, mouth_crop_bgr: np.ndarray, image_size: tuple, class_names: list[str]):

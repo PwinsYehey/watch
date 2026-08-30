@@ -88,12 +88,18 @@ cropCanvas.height = CONFIG.imageSize[1];
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
 
 // mirrors _predict_class_state in predict.py
-async function predictClassState(model, sourceCanvas, box, classNames, positiveClass) {
+async function predictClassState(model, sourceCanvas, box, classNames, positiveClass, desaturate = false) {
   cropCtx.drawImage(sourceCanvas, box.xMin, box.yMin, box.xMax - box.xMin, box.yMax - box.yMin, 0, 0, cropCanvas.width, cropCanvas.height);
   // .data() is async and non-blocking; dataSync() stalls the main thread waiting on the GPU every call
   const predictionTensor = tf.tidy(() => {
-    const input = tf.browser.fromPixels(cropCanvas).toFloat().div(255.0).expandDims(0);
-    return model.predict(input);
+    let input = tf.browser.fromPixels(cropCanvas).toFloat();
+    if (desaturate) {
+      // matches cv2.cvtColor(..., COLOR_BGR2GRAY)'s luma weights, replicated back to 3 channels
+      const [r, g, b] = tf.split(input, 3, 2);
+      const gray = r.mul(0.299).add(g.mul(0.587)).add(b.mul(0.114));
+      input = tf.concat([gray, gray, gray], 2);
+    }
+    return model.predict(input.div(255.0).expandDims(0));
   });
   const prediction = await predictionTensor.data();
   predictionTensor.dispose();
@@ -108,9 +114,10 @@ async function predictClassState(model, sourceCanvas, box, classNames, positiveC
 let drawingUtils = null;
 
 async function drawEye(side, box, ear, model, earCfg, landmarks) {
-  // kept for display/logging only -- the open/closed decision below is EAR-only, a hard cutoff at the calibrated threshold
-  const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed");
-  const closedness = ear <= earCfg.closedThreshold ? 1.0 : 0.0;
+  const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed", true);
+  const earClosedness = ear <= earCfg.closedThreshold ? 1.0 : 0.0;
+  // no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
+  const closedness = Math.max(earClosedness, cnnClosedness);
   const label = closedness >= 0.5 ? "closed" : "open";
 
   const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_LEFT_EYE : FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE;
@@ -322,8 +329,8 @@ async function main() {
 
         const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
         const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-        const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15);
-        const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15);
+        const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
+        const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
         const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
         if (leftBox && rightBox && mouthBox) {

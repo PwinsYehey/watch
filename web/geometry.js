@@ -32,17 +32,30 @@ function mouthAspectRatio(landmarks, w, h) {
 }
 
 // mirrors _crop_from_landmarks in facemesh.py -- returns a bounding box in pixel space
-function boxFromLandmarks(landmarks, ids, w, h, margin) {
+function boxFromLandmarks(landmarks, ids, w, h, margin, square = false) {
   const xs = ids.map((i) => landmarks[i].x * w);
   const ys = ids.map((i) => landmarks[i].y * h);
   const xMin0 = Math.min(...xs), xMax0 = Math.max(...xs);
   const yMin0 = Math.min(...ys), yMax0 = Math.max(...ys);
   const boxW = xMax0 - xMin0, boxH = yMax0 - yMin0;
 
-  const xMin = Math.max(xMin0 - boxW * margin, 0);
-  const xMax = Math.min(xMax0 + boxW * margin, w);
-  const yMin = Math.max(yMin0 - boxH * margin, 0);
-  const yMax = Math.min(yMax0 + boxH * margin, h);
+  let xMin = xMin0 - boxW * margin;
+  let xMax = xMax0 + boxW * margin;
+  let yMin = yMin0 - boxH * margin;
+  let yMax = yMax0 + boxH * margin;
+
+  if (square) {
+    // pad the short side instead of stretching -- the eye CNN's training data is framed square
+    const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2;
+    const side = Math.max(xMax - xMin, yMax - yMin);
+    xMin = cx - side / 2; xMax = cx + side / 2;
+    yMin = cy - side / 2; yMax = cy + side / 2;
+  }
+
+  xMin = Math.max(xMin, 0);
+  xMax = Math.min(xMax, w);
+  yMin = Math.max(yMin, 0);
+  yMax = Math.min(yMax, h);
   if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) return null;
   if (xMax <= xMin || yMax <= yMin) return null;
   return { xMin, yMin, xMax, yMax };

@@ -55,7 +55,7 @@ class FaceRegions:
     landmarks: object
 
 
-def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float):
+def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float, square: bool = False):
     """Returns (crop, (x_min, y_min, x_max, y_max)), or None if the box is degenerate."""
     h, w = image.shape[:2]
     xs = [landmarks[i].x * w for i in ids]
@@ -65,10 +65,22 @@ def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: f
     y_min, y_max = min(ys), max(ys)
     box_w, box_h = x_max - x_min, y_max - y_min
 
-    x_min = max(int(x_min - box_w * margin), 0)
-    x_max = min(int(x_max + box_w * margin), w)
-    y_min = max(int(y_min - box_h * margin), 0)
-    y_max = min(int(y_max + box_h * margin), h)
+    x_min -= box_w * margin
+    x_max += box_w * margin
+    y_min -= box_h * margin
+    y_max += box_h * margin
+
+    if square:
+        # pad the short side instead of stretching -- the eye CNN's training data is framed square
+        cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
+        side = max(x_max - x_min, y_max - y_min)
+        x_min, x_max = cx - side / 2, cx + side / 2
+        y_min, y_max = cy - side / 2, cy + side / 2
+
+    x_min = max(int(x_min), 0)
+    x_max = min(int(x_max), w)
+    y_min = max(int(y_min), 0)
+    y_max = min(int(y_max), h)
 
     if x_max <= x_min or y_max <= y_min:
         return None
@@ -148,8 +160,8 @@ class EyeRegionTracker:
             return None
 
         landmarks = results.multi_face_landmarks[0].landmark
-        left = _crop_from_landmarks(image_bgr, landmarks, _LEFT_EYE_IDS, margin=0.15)
-        right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS, margin=0.15)
+        left = _crop_from_landmarks(image_bgr, landmarks, _LEFT_EYE_IDS, margin=0.15, square=True)
+        right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS, margin=0.15, square=True)
         mouth = _crop_from_landmarks(image_bgr, landmarks, _MOUTH_IDS, margin=0.3)
 
         if left is None or right is None or mouth is None:
