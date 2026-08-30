@@ -52,6 +52,7 @@ class FaceRegions:
     eyes: dict[str, EyeRegion]
     mouth: MouthRegion
     pitch: float | None
+    landmarks: object
 
 
 def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float):
@@ -169,6 +170,7 @@ class EyeRegionTracker:
             },
             mouth=MouthRegion(crop=mouth_crop, box=mouth_box, mar=mar),
             pitch=pitch,
+            landmarks=landmarks,
         )
 
     def close(self):
