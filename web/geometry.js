@@ -43,6 +43,7 @@ function boxFromLandmarks(landmarks, ids, w, h, margin) {
   const xMax = Math.min(xMax0 + boxW * margin, w);
   const yMin = Math.max(yMin0 - boxH * margin, 0);
   const yMax = Math.min(yMax0 + boxH * margin, h);
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) return null;
   if (xMax <= xMin || yMax <= yMin) return null;
   return { xMin, yMin, xMax, yMax };
 }

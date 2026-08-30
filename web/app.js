@@ -281,78 +281,83 @@ async function main() {
   let prevTime = performance.now();
 
   async function frame() {
-    if (paused) {
-      requestAnimationFrame(frame);
-      return;
-    }
-    updateMirror();
-    const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
-    const faceFound = result.faceLandmarks.length > 0;
-
-    if (!faceFound) {
-      if (noFaceSince === null) noFaceSince = performance.now();
-    } else if (noFaceSince !== null) {
-      // a face reappearing after a real gap likely means a new driver, so recalibrate for them automatically
-      const gap = performance.now() - noFaceSince;
-      noFaceSince = null;
-      if (gap >= NO_FACE_RECALIBRATE_GAP_MS) {
-        await runCalibration();
+    try {
+      if (paused) {
         requestAnimationFrame(frame);
         return;
       }
-    }
+      updateMirror();
+      const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
+      const faceFound = result.faceLandmarks.length > 0;
 
-    ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
-
-    let eyeClosedness = null, mouthOpenness = null, headDroop = null;
-    let leftResult = null, rightResult = null, mouthResult = null, headResult = null;
-    if (result.faceLandmarks.length) {
-      const lm = result.faceLandmarks[0];
-      const w = canvas.width, h = canvas.height;
-
-      const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
-      const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-      const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15);
-      const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15);
-      const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-
-      if (leftBox && rightBox && mouthBox) {
-        leftResult = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
-        rightResult = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
-        // average both eyes so one drooping eyelid still raises the score
-        eyeClosedness = (leftResult.closedness + rightResult.closedness) / 2;
-        mouthResult = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
-        mouthOpenness = mouthResult.openness;
-        if (result.facialTransformationMatrixes.length) {
-          headResult = headPoseStatus(pitchFromTransformMatrix(result.facialTransformationMatrixes[0].data), lm);
-          headDroop = headResult?.droop ?? null;
+      if (!faceFound) {
+        if (noFaceSince === null) noFaceSince = performance.now();
+      } else if (noFaceSince !== null) {
+        // a face reappearing after a real gap likely means a new driver, so recalibrate for them automatically
+        const gap = performance.now() - noFaceSince;
+        noFaceSince = null;
+        if (gap >= NO_FACE_RECALIBRATE_GAP_MS) {
+          await runCalibration();
+          requestAnimationFrame(frame);
+          return;
         }
       }
+
+      ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
+
+      let eyeClosedness = null, mouthOpenness = null, headDroop = null;
+      let leftResult = null, rightResult = null, mouthResult = null, headResult = null;
+      if (result.faceLandmarks.length) {
+        const lm = result.faceLandmarks[0];
+        const w = canvas.width, h = canvas.height;
+
+        const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
+        const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
+        const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15);
+        const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15);
+        const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
+
+        if (leftBox && rightBox && mouthBox) {
+          leftResult = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
+          rightResult = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
+          // average both eyes so one drooping eyelid still raises the score
+          eyeClosedness = (leftResult.closedness + rightResult.closedness) / 2;
+          mouthResult = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
+          mouthOpenness = mouthResult.openness;
+          if (result.facialTransformationMatrixes.length) {
+            headResult = headPoseStatus(pitchFromTransformMatrix(result.facialTransformationMatrixes[0].data), lm);
+            headDroop = headResult?.droop ?? null;
+          }
+        }
+      }
+      drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
+
+      const now = performance.now() / 1000;
+      const eyeStatus = eyeMonitor.update(eyeClosedness, now);
+      const yawnStatus = yawnMonitor.update(mouthOpenness, now);
+      const nodStatus = nodMonitor.update(headDroop, now);
+
+      let overallState;
+      if (eyeStatus.state === "no_face") overallState = "no_face";
+      else if ([eyeStatus.state, yawnStatus.state, nodStatus.state].includes("not_alert")) overallState = "not_alert";
+      else overallState = "alert";
+
+      if (overallState === "not_alert") startAlarm();
+      else stopAlarm();
+
+      drawBanner(overallState, eyeStatus, yawnStatus, nodStatus);
+
+      const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
+      prevTime = now;
+      ctx.fillStyle = "#00ffff";
+      ctx.font = "bold 12px sans-serif";
+      ctx.fillText(`FPS: ${fps.toFixed(1)}`, 20, canvas.height - 20);
+
+      requestAnimationFrame(frame);
+    } catch (err) {
+      console.error("frame() error, recovering:", err);
+      requestAnimationFrame(frame);
     }
-    drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
-
-    const now = performance.now() / 1000;
-    const eyeStatus = eyeMonitor.update(eyeClosedness, now);
-    const yawnStatus = yawnMonitor.update(mouthOpenness, now);
-    const nodStatus = nodMonitor.update(headDroop, now);
-
-    let overallState;
-    if (eyeStatus.state === "no_face") overallState = "no_face";
-    else if ([eyeStatus.state, yawnStatus.state, nodStatus.state].includes("not_alert")) overallState = "not_alert";
-    else overallState = "alert";
-
-    if (overallState === "not_alert") startAlarm();
-    else stopAlarm();
-
-    drawBanner(overallState, eyeStatus, yawnStatus, nodStatus);
-
-    const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
-    prevTime = now;
-    ctx.fillStyle = "#00ffff";
-    ctx.font = "bold 12px sans-serif";
-    ctx.fillText(`FPS: ${fps.toFixed(1)}`, 20, canvas.height - 20);
-
-    requestAnimationFrame(frame);
   }
 
   requestAnimationFrame(frame);
