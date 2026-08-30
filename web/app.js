@@ -5,7 +5,10 @@ import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdel
 const NO_FACE_RECALIBRATE_GAP_MS = 3000;
 
 const video = document.getElementById("video");
-const canvas = document.getElementById("output");
+const displayCanvas = document.getElementById("output");
+const displayCtx = displayCanvas.getContext("2d");
+
+const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 
 const mirrorCanvas = document.createElement("canvas");
@@ -186,6 +189,7 @@ async function calibrateEar(faceLandmarker, durationSec, closedFraction) {
     ctx.font = "bold 14px sans-serif";
     ctx.fillText("Calibrating -- look at the camera normally", 20, 40);
     ctx.fillText(`${remaining.toFixed(1)}s`, 20, 80);
+    displayCtx.drawImage(canvas, 0, 0);
     await new Promise((r) => requestAnimationFrame(r));
   }
 
@@ -231,6 +235,8 @@ async function main() {
   video.play();
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+  displayCanvas.width = video.videoWidth;
+  displayCanvas.height = video.videoHeight;
   mirrorCanvas.width = video.videoWidth;
   mirrorCanvas.height = video.videoHeight;
 
@@ -353,6 +359,7 @@ async function main() {
       ctx.font = "bold 12px sans-serif";
       ctx.fillText(`FPS: ${fps.toFixed(1)}`, 20, canvas.height - 20);
 
+      displayCtx.drawImage(canvas, 0, 0);
       requestAnimationFrame(frame);
     } catch (err) {
       console.error("frame() error, recovering:", err);
