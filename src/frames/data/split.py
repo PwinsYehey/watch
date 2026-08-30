@@ -25,8 +25,8 @@ def _assign_subject_splits(subjects: list[str], ratios: dict, rng: np.random.Gen
     return assignment
 
 
-def split_manifest(manifest: pd.DataFrame, ratios: dict, seed: int = 42) -> pd.DataFrame:
-    """Adds a 'split' column to `manifest`, namespacing subject_id per-dataset so identical ids across datasets never collide."""
+def split_manifest(manifest: pd.DataFrame, ratios: dict, seed: int = 42, force_split: dict[str, str] | None = None) -> pd.DataFrame:
+    """Adds a 'split' column to `manifest`, namespacing subject_id per-dataset; `force_split` pins specific 'dataset::subject_id' groups to a split, overriding the random assignment."""
     manifest = manifest.copy()
     manifest["group_id"] = manifest["dataset"] + "::" + manifest["subject_id"].astype(str)
 
@@ -36,6 +36,9 @@ def split_manifest(manifest: pd.DataFrame, ratios: dict, seed: int = 42) -> pd.D
     assignment: dict[str, str] = {}
     for label, subjects_for_label in majority_label.groupby(majority_label):
         assignment.update(_assign_subject_splits(list(subjects_for_label.index), ratios, rng))
+
+    if force_split:
+        assignment.update(force_split)
 
     manifest["split"] = manifest["group_id"].map(assignment)
     return manifest
@@ -76,7 +79,9 @@ def main():
         manifests.append(build_manifest(name, raw_dir / ds_config["raw_subdir"]))
 
     combined = pd.concat(manifests, ignore_index=True)
-    combined = split_manifest(combined, config["split"]["ratios"], seed=config["project"]["seed"])
+    # nthu_eye has only 4 subjects, so random assignment could strand all of them in train.
+    nthu_holdout = {"nthu_eye::002": "test", "nthu_eye::006": "val"}
+    combined = split_manifest(combined, config["split"]["ratios"], seed=config["project"]["seed"], force_split=nthu_holdout)
     report_split(combined)
 
     # store paths relative to the project root so manifest.csv is portable across machines/clones

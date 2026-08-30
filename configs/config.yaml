@@ -18,6 +18,10 @@ datasets:
   cew:
     raw_subdir: cew
     enabled: true
+  nthu_eye:
+    # Real subject ids from NTHU-DDD, extracted via cli/extract_nthu.py; adds glasses-wearing subject diversity MRL/CEW lack.
+    raw_subdir: nthu_eye
+    enabled: true
 
 yawn_dataset:
   yawdd:

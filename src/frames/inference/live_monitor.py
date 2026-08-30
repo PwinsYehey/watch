@@ -49,8 +49,8 @@ def _build_monitor(cfg: dict) -> AlertnessMonitor:
 def _draw_eye(frame, side: str, region: EyeRegion, model, image_size, class_names, ear_cfg) -> float:
     _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
     ear_closedness = _linear_score(region.ear, ear_cfg["open_threshold"], ear_cfg["closed_threshold"])
-    # either signal suggesting closure is enough -- a safety monitor should not need both to agree
-    closedness = max(cnn_closedness, ear_closedness)
+    # the CNN can raise closedness when EAR is ambiguous, but can't override a clearly-open EAR reading
+    closedness = max(cnn_closedness, ear_closedness) if ear_closedness > 0 else 0.0
     # the displayed label always matches this combined score, not just the CNN's own opinion
     label = "closed" if closedness >= 0.5 else "open"
 
