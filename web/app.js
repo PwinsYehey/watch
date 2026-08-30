@@ -7,6 +7,16 @@ const NO_FACE_RECALIBRATE_GAP_MS = 3000;
 const video = document.getElementById("video");
 const canvas = document.getElementById("output");
 const ctx = canvas.getContext("2d");
+
+const mirrorCanvas = document.createElement("canvas");
+const mirrorCtx = mirrorCanvas.getContext("2d");
+
+function updateMirror() {
+  mirrorCtx.save();
+  mirrorCtx.scale(-1, 1);
+  mirrorCtx.drawImage(video, -mirrorCanvas.width, 0, mirrorCanvas.width, mirrorCanvas.height);
+  mirrorCtx.restore();
+}
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
 const muteBtn = document.getElementById("muteBtn");
@@ -163,8 +173,9 @@ async function calibrateEar(faceLandmarker, durationSec, closedFraction) {
   const samples = [];
   const start = performance.now();
   while (performance.now() - start < durationSec * 1000) {
-    const result = faceLandmarker.detectForVideo(video, performance.now());
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    updateMirror();
+    const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
+    ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
       samples.push(eyeAspectRatio(lm, canvas.width, canvas.height, LEFT_EYE_EAR_POINTS));
@@ -220,6 +231,8 @@ async function main() {
   video.play();
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+  mirrorCanvas.width = video.videoWidth;
+  mirrorCanvas.height = video.videoHeight;
 
   statusEl.textContent = "";
   let earCfg = CONFIG.ear;
@@ -272,7 +285,8 @@ async function main() {
       requestAnimationFrame(frame);
       return;
     }
-    const result = faceLandmarker.detectForVideo(video, performance.now());
+    updateMirror();
+    const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
     const faceFound = result.faceLandmarks.length > 0;
 
     if (!faceFound) {
@@ -288,7 +302,7 @@ async function main() {
       }
     }
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
 
     let eyeClosedness = null, mouthOpenness = null, headDroop = null;
     let leftResult = null, rightResult = null, mouthResult = null, headResult = null;
