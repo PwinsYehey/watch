@@ -85,9 +85,14 @@ alertness:
   closedness_threshold: 0.4
 
 ear:
-  # Eye Aspect Ratio thresholds, calibrated from observed open (0.37-0.40) and closed (0.0-0.08) values.
+  # Fallback thresholds used only if live per-user calibration fails.
   open_threshold: 0.35
   closed_threshold: 0.10
+
+calibration:
+  # live.py measures each user's own open-eye EAR at startup so the threshold fits their eye shape.
+  duration_sec: 4.0
+  closed_fraction: 0.3
 
 mar:
   # Mouth Aspect Ratio thresholds -- 0.6 also marks the yawn cutoff used when filtering YawDD frames.

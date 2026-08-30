@@ -1,3 +1,4 @@
+import statistics
 import time
 
 import cv2
@@ -44,6 +45,32 @@ def _build_monitor(cfg: dict) -> AlertnessMonitor:
         closedness_threshold=cfg["closedness_threshold"],
         dip_grace_period=cfg.get("dip_grace_period_sec", 0.0),
     )
+
+
+def _calibrate_ear(cap, tracker, duration_sec: float, closed_fraction: float) -> dict | None:
+    """Measures this user's own open-eye EAR for a few seconds so thresholds fit their eye shape, not a population average."""
+    samples = []
+    start = time.time()
+    while time.time() - start < duration_sec:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        frame = cv2.flip(frame, 1)
+        regions = tracker.extract(frame)
+        if regions is not None:
+            samples.extend(eye.ear for eye in regions.eyes.values())
+
+        remaining = duration_sec - (time.time() - start)
+        cv2.putText(frame, "Calibrating -- look at the camera normally", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+        cv2.putText(frame, f"{remaining:.1f}s", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+        cv2.imshow("FRAMES - Live Alertness Monitoring (press q to quit)", frame)
+        cv2.waitKey(1)
+
+    if len(samples) < 10:
+        return None
+
+    baseline = statistics.median(samples)
+    return {"open_threshold": baseline, "closed_threshold": baseline * closed_fraction}
 
 
 def _draw_eye(frame, side: str, region: EyeRegion, model, image_size, class_names, ear_cfg) -> float:
@@ -112,6 +139,7 @@ def main():
     yawn_class_names = config["yawn_model"]["class_names"]
     alertness_cfg = config["alertness"]
     ear_cfg = config["ear"]
+    calibration_cfg = config["calibration"]
     mar_cfg = config["mar"]
     yawn_cfg = config["yawn"]
     head_pose_cfg = config["head_pose"]
@@ -132,6 +160,13 @@ def main():
     prev_time = time.time()
 
     with EyeRegionTracker(static_image_mode=False) as tracker:
+        calibrated = _calibrate_ear(cap, tracker, calibration_cfg["duration_sec"], calibration_cfg["closed_fraction"])
+        if calibrated is not None:
+            ear_cfg = calibrated
+            print(f"Calibrated EAR thresholds: open>={ear_cfg['open_threshold']:.2f}, closed<={ear_cfg['closed_threshold']:.2f}")
+        else:
+            print("Calibration failed (no face detected) -- using default EAR thresholds.")
+
         try:
             while True:
                 ok, frame = cap.read()
