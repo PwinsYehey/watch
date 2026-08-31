@@ -14,6 +14,7 @@
     #status { margin-top: 10px; color: #0cf; min-height: 20px; }
     #startBtn, #muteBtn { margin-top: 10px; padding: 10px 24px; font-size: 15px; cursor: pointer; }
     #muteBtn { display: none; margin-left: 8px; }
+    .upload-row { margin-top: 16px; font-size: 13px; color: #999; }
     footer { margin-top: 30px; font-size: 12px; color: #555; }
   </style>
 </head>
@@ -29,6 +30,10 @@
     <button id="startBtn">Start</button>
     <button id="muteBtn">Mute Alarm</button>
   </div>
+  <div class="upload-row">
+    <label for="imageUpload">Or test a single image: upload a file, or paste one (Ctrl+V) anywhere on this page.</label><br />
+    <input type="file" id="imageUpload" accept="image/*" />
+  </div>
   <div id="status"></div>
 
   <script src="lib/tf.min.js?v=9"></script>
@@ -36,7 +41,7 @@
   <script src="config.js?v=16"></script>
   <script src="geometry.js?v=15"></script>
   <script src="alertness.js?v=10"></script>
-  <script type="module" src="app.js?v=25"></script>
+  <script type="module" src="app.js?v=30"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>

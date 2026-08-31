@@ -4,6 +4,9 @@ import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdel
 // a real gap this long (not just a blink or a momentary tracking miss) means the driver likely changed
 const NO_FACE_RECALIBRATE_GAP_MS = 3000;
 
+const DISPLAY_WIDTH = 640;
+const DISPLAY_HEIGHT = 480;
+
 const video = document.getElementById("video");
 const displayCanvas = document.getElementById("output");
 const displayCtx = displayCanvas.getContext("2d");
@@ -23,6 +26,7 @@ function updateMirror() {
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
 const muteBtn = document.getElementById("muteBtn");
+const imageUpload = document.getElementById("imageUpload");
 
 const OPEN_COLOR = "#00c800";
 const CLOSED_COLOR = "#dc0000";
@@ -112,6 +116,44 @@ async function predictClassState(model, sourceCanvas, box, classNames, positiveC
 }
 
 let drawingUtils = null;
+let earCfg = CONFIG.ear;
+
+let modelsPromise = null;
+function ensureModels() {
+  if (!modelsPromise) {
+    modelsPromise = (async () => {
+      tf.wasm.setWasmPaths("lib/");
+      let backendOk = await tf.setBackend("webgl");
+      if (!backendOk) backendOk = await tf.setBackend("wasm");
+      await tf.ready();
+      console.log("TF.js backend:", tf.getBackend());
+
+      const eyeModel = await tf.loadLayersModel("models/eye/model.json");
+      const yawnModel = await tf.loadLayersModel("models/yawn/model.json");
+
+      tf.tidy(() => {
+        const dummy = tf.zeros([1, ...CONFIG.imageSize, 3]);
+        eyeModel.predict(dummy);
+        yawnModel.predict(dummy);
+      });
+
+      const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        outputFacialTransformationMatrixes: true,
+      });
+
+      drawingUtils = new DrawingUtils(ctx);
+      return { eyeModel, yawnModel, faceLandmarker };
+    })();
+  }
+  return modelsPromise;
+}
 
 async function drawEye(side, box, ear, model, earCfg, landmarks) {
   const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed", true);
@@ -208,37 +250,11 @@ async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
 }
 
 async function main() {
-  // plain "cpu" is a slow reference backend, so prefer webgl, then the XNNPACK/SIMD-accelerated "wasm" backend
-  tf.wasm.setWasmPaths("lib/");
-  let backendOk = await tf.setBackend("webgl");
-  if (!backendOk) backendOk = await tf.setBackend("wasm");
-  await tf.ready();
-  console.log("TF.js backend:", tf.getBackend());
-
   statusEl.textContent = "Loading models...";
-  const eyeModel = await tf.loadLayersModel("models/eye/model.json");
-  const yawnModel = await tf.loadLayersModel("models/yawn/model.json");
-
-  // warm up both models so shader compilation happens now, not on the first real frame
-  tf.tidy(() => {
-    const dummy = tf.zeros([1, ...CONFIG.imageSize, 3]);
-    eyeModel.predict(dummy);
-    yawnModel.predict(dummy);
-  });
-
-  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-  const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-      delegate: "GPU",
-    },
-    runningMode: "VIDEO",
-    numFaces: 1,
-    outputFacialTransformationMatrixes: true,
-  });
+  const { eyeModel, yawnModel, faceLandmarker } = await ensureModels();
 
   statusEl.textContent = "Requesting camera...";
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT } });
   video.srcObject = stream;
   await new Promise((r) => (video.onloadedmetadata = r));
   video.play();
@@ -250,7 +266,7 @@ async function main() {
   mirrorCanvas.height = video.videoHeight;
 
   statusEl.textContent = "";
-  let earCfg = CONFIG.ear;
+  earCfg = CONFIG.ear;
   let paused = false;
   let noFaceSince = null;
 
@@ -383,6 +399,111 @@ async function main() {
 
   requestAnimationFrame(frame);
 }
+
+function drawSnapshotBanner(state) {
+  ctx.fillStyle = BANNER_COLORS[state];
+  ctx.fillRect(0, 0, canvas.width, 50);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.fillText(BANNER_TEXT[state], 20, 34);
+}
+
+async function handleImageUpload(file) {
+  statusEl.textContent = "Loading models...";
+  const { eyeModel, yawnModel, faceLandmarker } = await ensureModels();
+
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  try {
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error("Could not load that image file."));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+
+  const w = DISPLAY_WIDTH, h = DISPLAY_HEIGHT;
+  canvas.width = displayCanvas.width = mirrorCanvas.width = w;
+  canvas.height = displayCanvas.height = mirrorCanvas.height = h;
+
+  const fitScale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+  const drawW = img.naturalWidth * fitScale;
+  const drawH = img.naturalHeight * fitScale;
+  const offsetX = (w - drawW) / 2;
+  const offsetY = (h - drawH) / 2;
+
+  mirrorCtx.fillStyle = "#000";
+  mirrorCtx.fillRect(0, 0, w, h);
+  mirrorCtx.save();
+  mirrorCtx.scale(-1, 1);
+  mirrorCtx.drawImage(img, -(offsetX + drawW), offsetY, drawW, drawH);
+  mirrorCtx.restore();
+  ctx.drawImage(mirrorCanvas, 0, 0);
+
+  statusEl.textContent = "";
+  const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
+  if (!result.faceLandmarks.length) {
+    drawSnapshotBanner("no_face");
+    displayCtx.drawImage(canvas, 0, 0);
+    return;
+  }
+
+  const lm = result.faceLandmarks[0];
+  const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
+  const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
+  const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
+  const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
+  const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
+
+  if (!leftBox || !rightBox || !mouthBox) {
+    drawSnapshotBanner("no_face");
+    displayCtx.drawImage(canvas, 0, 0);
+    return;
+  }
+
+  const left = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
+  const right = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
+  const mouth = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
+  let head = null;
+  if (result.facialTransformationMatrixes.length) {
+    const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+    head = headPoseStatus(headPose.pitch, headPose.roll, lm);
+  }
+  const eyeClosedness = (left.closedness + right.closedness) / 2;
+  const notAlert =
+    eyeClosedness >= CONFIG.alertness.closednessThreshold ||
+    mouth.openness >= CONFIG.yawn.closednessThreshold ||
+    (head !== null && head.droop >= CONFIG.nod.closednessThreshold);
+
+  drawSnapshotBanner(notAlert ? "not_alert" : "alert");
+  drawStatusPanel(left, right, mouth, head);
+  displayCtx.drawImage(canvas, 0, 0);
+}
+
+function runImageUpload(file) {
+  handleImageUpload(file).catch((err) => {
+    statusEl.textContent = `Error: ${err.message}`;
+    console.error(err);
+  });
+}
+
+imageUpload.addEventListener("change", () => {
+  const file = imageUpload.files[0];
+  if (file) runImageUpload(file);
+});
+
+document.addEventListener("paste", (event) => {
+  const items = event.clipboardData ? event.clipboardData.items : [];
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) runImageUpload(file);
+      break;
+    }
+  }
+});
 
 startBtn.addEventListener("click", () => {
   // unlock the alarm's AudioContext inside this click, browsers block audio without a user gesture
