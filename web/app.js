@@ -148,20 +148,27 @@ function ensureModels() {
         numFaces: 1,
         outputFacialTransformationMatrixes: true,
       });
-      const uploadFaceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions,
-        runningMode: "IMAGE",
-        numFaces: 1,
-        outputFacialTransformationMatrixes: true,
-        minFaceDetectionConfidence: 0.1,
-        minFacePresenceConfidence: 0.1,
-      });
 
       drawingUtils = new DrawingUtils(ctx);
-      return { eyeModel, yawnModel, faceLandmarker, uploadFaceLandmarker };
+      return { eyeModel, yawnModel, faceLandmarker, vision, baseOptions };
     })();
   }
   return modelsPromise;
+}
+
+let uploadFaceLandmarkerPromise = null;
+function ensureUploadFaceLandmarker(vision, baseOptions) {
+  if (!uploadFaceLandmarkerPromise) {
+    uploadFaceLandmarkerPromise = FaceLandmarker.createFromOptions(vision, {
+      baseOptions,
+      runningMode: "IMAGE",
+      numFaces: 1,
+      outputFacialTransformationMatrixes: true,
+      minFaceDetectionConfidence: 0.1,
+      minFacePresenceConfidence: 0.1,
+    });
+  }
+  return uploadFaceLandmarkerPromise;
 }
 
 async function drawEye(side, box, ear, model, earCfg, landmarks) {
@@ -362,11 +369,14 @@ async function main() {
         const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
         if (leftBox && rightBox && mouthBox) {
-          leftResult = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
-          rightResult = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
+          // run all three CNN calls concurrently instead of awaiting each GPU round-trip in turn
+          [leftResult, rightResult, mouthResult] = await Promise.all([
+            drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm),
+            drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm),
+            drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm),
+          ]);
           // average both eyes so one drooping eyelid still raises the score
           eyeClosedness = (leftResult.closedness + rightResult.closedness) / 2;
-          mouthResult = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
           mouthOpenness = mouthResult.openness;
           if (result.facialTransformationMatrixes.length) {
             const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
@@ -419,7 +429,8 @@ function drawSnapshotBanner(state) {
 
 async function handleImageUpload(file) {
   statusEl.textContent = "Loading models...";
-  const { eyeModel, yawnModel, uploadFaceLandmarker } = await ensureModels();
+  const { eyeModel, yawnModel, vision, baseOptions } = await ensureModels();
+  const uploadFaceLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
 
   const img = new Image();
   const url = URL.createObjectURL(file);
