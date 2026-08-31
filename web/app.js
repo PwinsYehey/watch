@@ -298,7 +298,7 @@ async function main() {
   cameraActive = true;
   startBtn.disabled = false;
   startBtnLabel.textContent = "Stop camera";
-  cameraIcon.hidden = true;
+  cameraIcon.style.display = "none";
   liveDot.hidden = false;
   playStartSound();
   displayCanvas.classList.add("capturable");
@@ -691,7 +691,7 @@ function stopCamera() {
   stopAlarm();
   playStopSound();
   muteBtn.style.display = "none";
-  cameraIcon.hidden = false;
+  cameraIcon.style.display = "";
   liveDot.hidden = true;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
