@@ -29,8 +29,13 @@ function updateMirror() {
 }
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
+const startBtnLabel = document.getElementById("startBtnLabel");
+const uploadBtn = document.getElementById("uploadBtn");
 const muteBtn = document.getElementById("muteBtn");
 const imageUpload = document.getElementById("imageUpload");
+
+let cameraActive = false;
+let cameraStream = null;
 
 const OPEN_COLOR = "#00c800";
 const CLOSED_COLOR = "#dc0000";
@@ -285,6 +290,12 @@ async function main() {
 
   statusEl.textContent = "Requesting camera...";
   const stream = await navigator.mediaDevices.getUserMedia({ video: { width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT } });
+  cameraStream = stream;
+  cameraActive = true;
+  startBtn.disabled = false;
+  startBtnLabel.textContent = "Stop camera";
+  imageUpload.disabled = true;
+  uploadBtn.classList.add("disabled");
   video.srcObject = stream;
   await new Promise((r) => (video.onloadedmetadata = r));
   video.play();
@@ -346,6 +357,7 @@ async function main() {
   let prevTime = performance.now();
 
   async function frame() {
+    if (!cameraActive) return;
     try {
       if (paused) {
         requestAnimationFrame(frame);
@@ -570,6 +582,7 @@ async function handleImageUpload(file) {
 }
 
 function runImageUpload(file) {
+  if (cameraActive) return;
   handleImageUpload(file).catch((err) => {
     statusEl.textContent = `Error: ${err.message}`;
     console.error(err);
@@ -592,13 +605,31 @@ document.addEventListener("paste", (event) => {
   }
 });
 
+function stopCamera() {
+  cameraActive = false;
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+  stopAlarm();
+  muteBtn.style.display = "none";
+  startBtnLabel.textContent = "Use camera";
+  imageUpload.disabled = false;
+  uploadBtn.classList.remove("disabled");
+  statusEl.textContent = "";
+}
+
 startBtn.addEventListener("click", () => {
-  // unlock the alarm's AudioContext inside this click, browsers block audio without a user gesture
+  if (cameraActive) {
+    stopCamera();
+    return;
+  }
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   startBtn.disabled = true;
   main().catch((err) => {
     statusEl.textContent = `Error: ${err.message}`;
     console.error(err);
+    startBtn.disabled = false;
   });
 });
 
