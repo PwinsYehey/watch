@@ -32,6 +32,8 @@ function updateMirror() {
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
 const startBtnLabel = document.getElementById("startBtnLabel");
+const cameraIcon = document.getElementById("cameraIcon");
+const liveDot = document.getElementById("liveDot");
 const uploadBtn = document.getElementById("uploadBtn");
 const muteBtn = document.getElementById("muteBtn");
 const imageUpload = document.getElementById("imageUpload");
@@ -296,6 +298,9 @@ async function main() {
   cameraActive = true;
   startBtn.disabled = false;
   startBtnLabel.textContent = "Stop camera";
+  cameraIcon.hidden = true;
+  liveDot.hidden = false;
+  playStartSound();
   displayCanvas.classList.add("capturable");
   captureHint.hidden = false;
   imageUpload.disabled = true;
@@ -619,17 +624,33 @@ document.addEventListener("paste", (event) => {
   }
 });
 
-function playShutterSound() {
+function playTone(freq, startOffset, duration) {
   if (!audioCtx) return;
+  const t = audioCtx.currentTime + startOffset;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = "square";
-  osc.frequency.value = 1000;
-  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.3, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
   osc.connect(gain).connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.08);
+  osc.start(t);
+  osc.stop(t + duration);
+}
+
+function playShutterSound() {
+  playTone(1400, 0, 0.03);
+  playTone(700, 0.04, 0.04);
+}
+
+function playStartSound() {
+  playTone(440, 0, 0.08);
+  playTone(880, 0.09, 0.08);
+}
+
+function playStopSound() {
+  playTone(880, 0, 0.08);
+  playTone(440, 0.09, 0.08);
 }
 
 function flashCapture() {
@@ -668,7 +689,10 @@ function stopCamera() {
   displayCanvas.classList.remove("capturable");
   captureHint.hidden = true;
   stopAlarm();
+  playStopSound();
   muteBtn.style.display = "none";
+  cameraIcon.hidden = false;
+  liveDot.hidden = true;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
   uploadBtn.classList.remove("disabled");

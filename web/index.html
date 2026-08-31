@@ -24,6 +24,8 @@
     #startBtn:hover, .upload-btn:hover { background: #0cf; color: #111; border-color: #0cf; }
     .upload-btn.disabled { opacity: 0.5; pointer-events: none; }
     .btn-icon { width: 16px; height: 16px; flex-shrink: 0; }
+    .live-dot { border-radius: 50%; background: #ff3b3b; animation: livePulse 1.2s ease-in-out infinite; }
+    @keyframes livePulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.3); } }
     #muteBtn { display: none; margin-top: 10px; padding: 10px 24px; font-size: 15px; cursor: pointer; }
     .paste-hint { margin-top: 10px; font-size: 13px; color: #999; }
     #imageUpload { display: none; }
@@ -57,7 +59,8 @@
   </div>
   <div class="actions-row">
     <button id="startBtn">
-      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>
+      <svg class="btn-icon" id="cameraIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>
+      <span class="btn-icon live-dot" id="liveDot" hidden></span>
       <span id="startBtnLabel">Use camera</span>
     </button>
     <label for="imageUpload" class="upload-btn" id="uploadBtn">
@@ -76,7 +79,7 @@
   <script src="config.js?v=16"></script>
   <script src="geometry.js?v=15"></script>
   <script src="alertness.js?v=10"></script>
-  <script type="module" src="app.js?v=44"></script>
+  <script type="module" src="app.js?v=45"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>
