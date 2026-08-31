@@ -171,6 +171,14 @@ function ensureUploadFaceLandmarker(vision, baseOptions) {
   return uploadFaceLandmarkerPromise;
 }
 
+let blazefacePromise = null;
+function ensureBlazeface() {
+  if (!blazefacePromise) {
+    blazefacePromise = blazeface.load({ maxFaces: 1, scoreThreshold: 0.3 });
+  }
+  return blazefacePromise;
+}
+
 async function drawEye(side, box, ear, model, earCfg, landmarks) {
   const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed", true);
   const earClosedness = ear <= earCfg.closedThreshold ? 1.0 : 0.0;
@@ -427,6 +435,34 @@ function drawSnapshotBanner(state) {
   ctx.fillText(BANNER_TEXT[state], 20, 34);
 }
 
+async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
+  const blazefaceModel = await ensureBlazeface();
+  const faces = await blazefaceModel.estimateFaces(mirrorCanvas, false);
+  if (!faces.length) return null;
+
+  const [x1, y1] = faces[0].topLeft;
+  const [x2, y2] = faces[0].bottomRight;
+  const boxW = x2 - x1, boxH = y2 - y1;
+  const pad = 0.6;
+  const cropX = Math.max(0, x1 - boxW * pad);
+  const cropY = Math.max(0, y1 - boxH * pad);
+  const cropW = Math.min(w, x2 + boxW * pad) - cropX;
+  const cropH = Math.min(h, y2 + boxH * pad) - cropY;
+  if (cropW <= 0 || cropH <= 0) return null;
+
+  const cropped = document.createElement("canvas");
+  cropped.width = w;
+  cropped.height = h;
+  cropped.getContext("2d").drawImage(mirrorCanvas, cropX, cropY, cropW, cropH, 0, 0, w, h);
+
+  const retryResult = uploadFaceLandmarker.detect(cropped);
+  if (!retryResult.faceLandmarks.length) return null;
+
+  mirrorCtx.clearRect(0, 0, w, h);
+  mirrorCtx.drawImage(cropped, 0, 0);
+  return retryResult;
+}
+
 async function handleImageUpload(file) {
   statusEl.textContent = "Loading models...";
   const { eyeModel, yawnModel, vision, baseOptions } = await ensureModels();
@@ -463,7 +499,17 @@ async function handleImageUpload(file) {
   ctx.drawImage(mirrorCanvas, 0, 0);
 
   statusEl.textContent = "";
-  const result = uploadFaceLandmarker.detect(mirrorCanvas);
+  let result = uploadFaceLandmarker.detect(mirrorCanvas);
+  if (!result.faceLandmarks.length) {
+    statusEl.textContent = "No face found directly -- retrying with a coarser detector...";
+    const retried = await tryCropAndRetry(uploadFaceLandmarker, w, h);
+    statusEl.textContent = "";
+    if (retried) {
+      result = retried;
+      ctx.drawImage(mirrorCanvas, 0, 0);
+    }
+  }
+
   if (!result.faceLandmarks.length) {
     drawSnapshotBanner("no_face");
     displayCtx.drawImage(canvas, 0, 0);
