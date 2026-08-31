@@ -437,6 +437,7 @@ async function main() {
       ctx.font = "bold 12px sans-serif";
       ctx.fillText(`FPS: ${fps.toFixed(1)}`, 20, canvas.height - 20);
 
+      if (!cameraActive) return;
       displayCtx.drawImage(canvas, 0, 0);
       requestAnimationFrame(frame);
     } catch (err) {
