@@ -14,6 +14,7 @@ const originalCanvas = document.getElementById("originalOutput");
 const originalCtx = originalCanvas.getContext("2d");
 const originalPanel = document.getElementById("originalPanel");
 const scannedLabel = document.getElementById("scannedLabel");
+const captureHint = document.getElementById("captureHint");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -294,6 +295,8 @@ async function main() {
   cameraActive = true;
   startBtn.disabled = false;
   startBtnLabel.textContent = "Stop camera";
+  displayCanvas.classList.add("capturable");
+  captureHint.hidden = false;
   imageUpload.disabled = true;
   uploadBtn.classList.add("disabled");
   video.srcObject = stream;
@@ -605,12 +608,30 @@ document.addEventListener("paste", (event) => {
   }
 });
 
+displayCanvas.addEventListener("click", () => {
+  if (!cameraActive) return;
+  const captureCanvas = document.createElement("canvas");
+  captureCanvas.width = video.videoWidth;
+  captureCanvas.height = video.videoHeight;
+  captureCanvas.getContext("2d").drawImage(video, 0, 0);
+  captureCanvas.toBlob((blob) => {
+    if (!blob) return;
+    const file = new File([blob], "capture.png", { type: "image/png" });
+    stopCamera();
+    runImageUpload(file);
+  }, "image/png");
+});
+
 function stopCamera() {
   cameraActive = false;
   if (cameraStream) {
     cameraStream.getTracks().forEach((track) => track.stop());
     cameraStream = null;
   }
+  video.srcObject = null;
+  displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+  displayCanvas.classList.remove("capturable");
+  captureHint.hidden = true;
   stopAlarm();
   muteBtn.style.display = "none";
   startBtnLabel.textContent = "Use camera";
