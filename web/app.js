@@ -10,6 +10,10 @@ const DISPLAY_HEIGHT = 480;
 const video = document.getElementById("video");
 const displayCanvas = document.getElementById("output");
 const displayCtx = displayCanvas.getContext("2d");
+const originalCanvas = document.getElementById("originalOutput");
+const originalCtx = originalCanvas.getContext("2d");
+const originalPanel = document.getElementById("originalPanel");
+const scannedLabel = document.getElementById("scannedLabel");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -228,7 +232,7 @@ function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
 }
 
 // a single fixed panel for all per-cue readouts, so labels never overlap regardless of face size/position
-function drawStatusPanel(left, right, mouth, head) {
+function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   const lines = [
     left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
     right && { text: `right eye: ${right.label} ${Math.round(right.closedness * 100)}% | EAR ${right.ear.toFixed(2)}`, color: right.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
@@ -238,12 +242,12 @@ function drawStatusPanel(left, right, mouth, head) {
   if (!lines.length) return;
 
   const panelY = 88;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-  ctx.fillRect(10, panelY, 260, lines.length * 18 + 10);
-  ctx.font = "11px sans-serif";
+  targetCtx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  targetCtx.fillRect(10, panelY, 260, lines.length * 18 + 10);
+  targetCtx.font = "11px sans-serif";
   lines.forEach((line, i) => {
-    ctx.fillStyle = line.color;
-    ctx.fillText(line.text, 18, panelY + 18 * (i + 1));
+    targetCtx.fillStyle = line.color;
+    targetCtx.fillText(line.text, 18, panelY + 18 * (i + 1));
   });
 }
 
@@ -274,6 +278,8 @@ async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
 }
 
 async function main() {
+  originalPanel.hidden = true;
+  scannedLabel.hidden = true;
   statusEl.textContent = "Loading models...";
   const { eyeModel, yawnModel, faceLandmarker } = await ensureModels();
 
@@ -428,11 +434,11 @@ async function main() {
 }
 
 function drawSnapshotBanner(state) {
-  ctx.fillStyle = BANNER_COLORS[state];
-  ctx.fillRect(0, 0, canvas.width, 50);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 18px sans-serif";
-  ctx.fillText(BANNER_TEXT[state], 20, 34);
+  displayCtx.fillStyle = BANNER_COLORS[state];
+  displayCtx.fillRect(0, 0, displayCanvas.width, 50);
+  displayCtx.fillStyle = "#ffffff";
+  displayCtx.font = "bold 18px sans-serif";
+  displayCtx.fillText(BANNER_TEXT[state], 20, 34);
 }
 
 async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
@@ -463,6 +469,13 @@ async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
   return retryResult;
 }
 
+function blitUnmirrored() {
+  displayCtx.save();
+  displayCtx.scale(-1, 1);
+  displayCtx.drawImage(canvas, -canvas.width, 0, canvas.width, canvas.height);
+  displayCtx.restore();
+}
+
 async function handleImageUpload(file) {
   statusEl.textContent = "Loading models...";
   const { eyeModel, yawnModel, vision, baseOptions } = await ensureModels();
@@ -490,6 +503,14 @@ async function handleImageUpload(file) {
   const offsetX = (w - drawW) / 2;
   const offsetY = (h - drawH) / 2;
 
+  originalCanvas.width = w;
+  originalCanvas.height = h;
+  originalCtx.fillStyle = "#000";
+  originalCtx.fillRect(0, 0, w, h);
+  originalCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
+  originalPanel.hidden = false;
+  scannedLabel.hidden = false;
+
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);
   mirrorCtx.save();
@@ -511,8 +532,8 @@ async function handleImageUpload(file) {
   }
 
   if (!result.faceLandmarks.length) {
+    blitUnmirrored();
     drawSnapshotBanner("no_face");
-    displayCtx.drawImage(canvas, 0, 0);
     return;
   }
 
@@ -524,8 +545,8 @@ async function handleImageUpload(file) {
   const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
   if (!leftBox || !rightBox || !mouthBox) {
+    blitUnmirrored();
     drawSnapshotBanner("no_face");
-    displayCtx.drawImage(canvas, 0, 0);
     return;
   }
 
@@ -543,9 +564,9 @@ async function handleImageUpload(file) {
     mouth.openness >= CONFIG.yawn.closednessThreshold ||
     (head !== null && head.droop >= CONFIG.nod.closednessThreshold);
 
+  blitUnmirrored();
   drawSnapshotBanner(notAlert ? "not_alert" : "alert");
-  drawStatusPanel(left, right, mouth, head);
-  displayCtx.drawImage(canvas, 0, 0);
+  drawStatusPanel(left, right, mouth, head, displayCtx);
 }
 
 function runImageUpload(file) {

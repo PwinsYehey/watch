@@ -9,6 +9,9 @@
     h1 { font-size: 22px; font-weight: bold; letter-spacing: 2px; margin: 0; }
     .subtitle { font-size: 14px; color: #999; margin: 4px 0 0; }
     .testing-tag { font-size: 12px; color: #666; margin: 2px 0 16px; text-transform: uppercase; letter-spacing: 1px; }
+    .stage-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 16px; }
+    .stage-panel { max-width: 100%; }
+    .panel-label { font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
     .stage { position: relative; display: inline-block; max-width: 100%; }
     video { display: none; }
     canvas { max-width: 100%; height: auto; border: 1px solid #333; display: block; }
@@ -33,9 +36,18 @@
   <h1>F.R.A.M.E.S</h1>
   <p class="subtitle">Facial Recognition & Alertness Monitoring Engine System</p>
   <p class="testing-tag">Testing environment</p>
-  <div class="stage">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="output" width="640" height="480"></canvas>
+  <div class="stage-row">
+    <div class="stage-panel" id="originalPanel" hidden>
+      <div class="panel-label">Original</div>
+      <canvas id="originalOutput" width="640" height="480"></canvas>
+    </div>
+    <div class="stage-panel">
+      <div class="panel-label" id="scannedLabel" hidden>Scanned</div>
+      <div class="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="output" width="640" height="480"></canvas>
+      </div>
+    </div>
   </div>
   <div class="actions-row">
     <button id="startBtn">
@@ -58,7 +70,7 @@
   <script src="config.js?v=16"></script>
   <script src="geometry.js?v=15"></script>
   <script src="alertness.js?v=10"></script>
-  <script type="module" src="app.js?v=35"></script>
+  <script type="module" src="app.js?v=38"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>
