@@ -17,6 +17,7 @@
     canvas { max-width: 100%; height: auto; border: 1px solid #333; display: block; }
     #output.capturable { cursor: pointer; }
     .capture-hint { margin-top: 6px; font-size: 12px; color: #999; }
+    #flashOverlay { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
     #status { margin-top: 6px; color: #0cf; min-height: 14px; }
     .actions-row { margin-top: 16px; display: flex; justify-content: center; gap: 16px; }
     #startBtn, .upload-btn { padding: 10px 24px; font-size: 15px; cursor: pointer; background: #2a2a2a; color: #eee; border: 1px solid #555; border-radius: 4px; display: inline-flex; align-items: center; gap: 8px; }
@@ -49,6 +50,7 @@
       <div class="stage">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="output" width="640" height="480"></canvas>
+        <div id="flashOverlay"></div>
       </div>
       <p class="capture-hint" id="captureHint" hidden>Click the video to capture a photo for detailed analysis.</p>
     </div>
@@ -74,7 +76,7 @@
   <script src="config.js?v=16"></script>
   <script src="geometry.js?v=15"></script>
   <script src="alertness.js?v=10"></script>
-  <script type="module" src="app.js?v=42"></script>
+  <script type="module" src="app.js?v=44"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>

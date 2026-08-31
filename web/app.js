@@ -15,6 +15,7 @@ const originalCtx = originalCanvas.getContext("2d");
 const originalPanel = document.getElementById("originalPanel");
 const scannedLabel = document.getElementById("scannedLabel");
 const captureHint = document.getElementById("captureHint");
+const flashOverlay = document.getElementById("flashOverlay");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -492,7 +493,12 @@ function blitUnmirrored() {
   displayCtx.restore();
 }
 
-async function handleImageUpload(file) {
+async function handleImageUpload(file, alreadyMirrored = false) {
+  const finalBlit = () => {
+    if (alreadyMirrored) displayCtx.drawImage(canvas, 0, 0);
+    else blitUnmirrored();
+  };
+
   statusEl.textContent = "Loading models...";
   const { eyeModel, yawnModel, vision, baseOptions } = await ensureModels();
   const uploadFaceLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
@@ -529,10 +535,14 @@ async function handleImageUpload(file) {
 
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);
-  mirrorCtx.save();
-  mirrorCtx.scale(-1, 1);
-  mirrorCtx.drawImage(img, -(offsetX + drawW), offsetY, drawW, drawH);
-  mirrorCtx.restore();
+  if (alreadyMirrored) {
+    mirrorCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
+  } else {
+    mirrorCtx.save();
+    mirrorCtx.scale(-1, 1);
+    mirrorCtx.drawImage(img, -(offsetX + drawW), offsetY, drawW, drawH);
+    mirrorCtx.restore();
+  }
   ctx.drawImage(mirrorCanvas, 0, 0);
 
   statusEl.textContent = "";
@@ -548,7 +558,7 @@ async function handleImageUpload(file) {
   }
 
   if (!result.faceLandmarks.length) {
-    blitUnmirrored();
+    finalBlit();
     drawSnapshotBanner("no_face");
     return;
   }
@@ -561,7 +571,7 @@ async function handleImageUpload(file) {
   const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
   if (!leftBox || !rightBox || !mouthBox) {
-    blitUnmirrored();
+    finalBlit();
     drawSnapshotBanner("no_face");
     return;
   }
@@ -580,14 +590,14 @@ async function handleImageUpload(file) {
     mouth.openness >= CONFIG.yawn.closednessThreshold ||
     (head !== null && head.droop >= CONFIG.nod.closednessThreshold);
 
-  blitUnmirrored();
+  finalBlit();
   drawSnapshotBanner(notAlert ? "not_alert" : "alert");
   drawStatusPanel(left, right, mouth, head, displayCtx);
 }
 
-function runImageUpload(file) {
+function runImageUpload(file, alreadyMirrored = false) {
   if (cameraActive) return;
-  handleImageUpload(file).catch((err) => {
+  handleImageUpload(file, alreadyMirrored).catch((err) => {
     statusEl.textContent = `Error: ${err.message}`;
     console.error(err);
   });
@@ -609,17 +619,41 @@ document.addEventListener("paste", (event) => {
   }
 });
 
+function playShutterSound() {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "square";
+  osc.frequency.value = 1000;
+  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.08);
+}
+
+function flashCapture() {
+  flashOverlay.style.transition = "none";
+  flashOverlay.style.opacity = "1";
+  requestAnimationFrame(() => {
+    flashOverlay.style.transition = "opacity 400ms ease-out";
+    flashOverlay.style.opacity = "0";
+  });
+}
+
 displayCanvas.addEventListener("click", () => {
   if (!cameraActive) return;
+  flashCapture();
+  playShutterSound();
   const captureCanvas = document.createElement("canvas");
-  captureCanvas.width = video.videoWidth;
-  captureCanvas.height = video.videoHeight;
-  captureCanvas.getContext("2d").drawImage(video, 0, 0);
+  captureCanvas.width = mirrorCanvas.width;
+  captureCanvas.height = mirrorCanvas.height;
+  captureCanvas.getContext("2d").drawImage(mirrorCanvas, 0, 0);
   captureCanvas.toBlob((blob) => {
     if (!blob) return;
     const file = new File([blob], "capture.png", { type: "image/png" });
     stopCamera();
-    runImageUpload(file);
+    runImageUpload(file, true);
   }, "image/png");
 });
 
