@@ -138,18 +138,27 @@ function ensureModels() {
       });
 
       const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      const baseOptions = {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "GPU",
+      };
       const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-          delegate: "GPU",
-        },
+        baseOptions,
         runningMode: "VIDEO",
         numFaces: 1,
         outputFacialTransformationMatrixes: true,
       });
+      const uploadFaceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions,
+        runningMode: "IMAGE",
+        numFaces: 1,
+        outputFacialTransformationMatrixes: true,
+        minFaceDetectionConfidence: 0.1,
+        minFacePresenceConfidence: 0.1,
+      });
 
       drawingUtils = new DrawingUtils(ctx);
-      return { eyeModel, yawnModel, faceLandmarker };
+      return { eyeModel, yawnModel, faceLandmarker, uploadFaceLandmarker };
     })();
   }
   return modelsPromise;
@@ -410,7 +419,7 @@ function drawSnapshotBanner(state) {
 
 async function handleImageUpload(file) {
   statusEl.textContent = "Loading models...";
-  const { eyeModel, yawnModel, faceLandmarker } = await ensureModels();
+  const { eyeModel, yawnModel, uploadFaceLandmarker } = await ensureModels();
 
   const img = new Image();
   const url = URL.createObjectURL(file);
@@ -443,7 +452,7 @@ async function handleImageUpload(file) {
   ctx.drawImage(mirrorCanvas, 0, 0);
 
   statusEl.textContent = "";
-  const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
+  const result = uploadFaceLandmarker.detect(mirrorCanvas);
   if (!result.faceLandmarks.length) {
     drawSnapshotBanner("no_face");
     displayCtx.drawImage(canvas, 0, 0);
