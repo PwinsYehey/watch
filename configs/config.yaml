@@ -66,7 +66,7 @@ yawn_model:
 
 yawn_training:
   batch_size: 32
-  epochs: 30
+  epochs: 80
   early_stopping_patience: 8
   reduce_lr_patience: 3
 
