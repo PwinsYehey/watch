@@ -16,8 +16,7 @@ data/raw/**
 # Splits are small CSV/JSON manifests, not images: keep them tracked
 !data/splits/**
 
-# --- Model artifacts & results (large binaries, regenerable) ---
-models/**
+# --- Results (large, regenerable) ---
 results/**
 
 # --- OS / editor ---
