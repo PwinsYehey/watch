@@ -16,17 +16,20 @@ pip install -r requirements.txt -e .
 ## Run
 
 ```bash
-python cli/extract_nthu.py       # extract labeled eye frames from NTHU-DDD videos
-python cli/inspect_eye_data.py   # audit eye datasets (mrl_eye/cew)
-python cli/make_eye_splits.py    # build eye train/val/test split
-python cli/train_eye.py          # train the eye model
-python cli/grid_search_eye.py    # sweep eye model architecture/dropout/lr, resumable
-python cli/evaluate_eye.py       # eye test-set metrics
-python cli/benchmark_eye.py      # eye model inference speed/FPS
-python cli/extract_yawdd.py      # extract labeled mouth frames from YawDD videos
-python cli/make_yawn_splits.py   # build yawn train/val/test split
-python cli/train_yawn.py         # train the yawn model
-python cli/evaluate_yawn.py      # yawn test-set metrics
-python cli/predict.py photo.jpg  # eye/mouth/head state from a photo
-python cli/live.py               # live webcam alertness monitor
+python cli/eye/extract_nthu.py     # extract labeled eye frames from NTHU-DDD videos
+python cli/eye/inspect_data.py     # audit eye datasets (mrl_eye/cew)
+python cli/eye/make_splits.py      # build eye train/val/test split
+python cli/eye/train.py            # train the eye model
+python cli/eye/grid_search.py      # sweep eye model architecture/dropout/lr, resumable
+python cli/eye/evaluate.py         # eye test-set metrics
+python cli/eye/benchmark.py        # eye model inference speed/FPS
+
+python cli/yawn/extract_yawdd.py   # extract labeled mouth frames from YawDD videos
+python cli/yawn/make_splits.py     # build yawn train/val/test split
+python cli/yawn/train.py           # train the yawn model
+python cli/yawn/evaluate.py        # yawn test-set metrics
+
+python cli/predict.py photo.jpg    # eye/mouth/head state from a photo
+python cli/live.py                 # live webcam alertness monitor
+python cli/convert_web_models.py   # export both .keras models to TF.js for web/
 ```

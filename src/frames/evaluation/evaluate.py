@@ -11,13 +11,13 @@ from frames.data.generators import make_generators
 from frames.models.build_model import load_trained_model
 
 
-def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_name: str, output_prefix: str):
+def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_name: str, results_subdir: str):
     class_names = model_cfg["class_names"]
 
     _, _, test_generator = make_generators(config, manifest_filename=manifest_filename, class_names=class_names)
     model = load_trained_model(config, checkpoint_name=checkpoint_name)
 
-    results_dir = Path(config["paths"]["results_dir"])
+    results_dir = Path(config["paths"]["results_dir"]) / results_subdir
     results_dir.mkdir(parents=True, exist_ok=True)
 
     predictions = model.predict(test_generator, verbose=1)
@@ -26,7 +26,7 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
 
     report = classification_report(y_true, y_pred, target_names=class_names, output_dict=True)
     report_df = pd.DataFrame(report).transpose()
-    report_df.to_csv(results_dir / f"{output_prefix}classification_report.csv")
+    report_df.to_csv(results_dir / "classification_report.csv")
     print(report_df.to_string())
 
     cm = confusion_matrix(y_true, y_pred)
@@ -36,7 +36,7 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
     plt.tight_layout()
-    plt.savefig(results_dir / f"{output_prefix}confusion_matrix.png", dpi=300)
+    plt.savefig(results_dir / "confusion_matrix.png", dpi=300)
     plt.close()
 
     positive_index = 1  # class_names[1], e.g. "eyes_opened" or "yawn"
@@ -53,7 +53,7 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
     plt.title(f"ROC Curve ({class_names[positive_index]} vs rest)")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(results_dir / f"{output_prefix}roc_curve.png", dpi=300)
+    plt.savefig(results_dir / "roc_curve.png", dpi=300)
     plt.close()
 
     predictions_df = pd.DataFrame(
@@ -65,7 +65,7 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
         }
     )
     predictions_df["correct"] = predictions_df["actual"] == predictions_df["predicted"]
-    predictions_df.to_csv(results_dir / f"{output_prefix}test_predictions.csv", index=False)
+    predictions_df.to_csv(results_dir / "test_predictions.csv", index=False)
 
     print(f"\nTest accuracy: {(y_true == y_pred).mean():.4f}")
     print(f"ROC-AUC: {roc_auc:.4f}")
@@ -75,12 +75,12 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
 
 def main():
     config = load_config()
-    _evaluate(config, config["model"], "manifest.csv", "eye_model.keras", "eye_")
+    _evaluate(config, config["model"], "manifest.csv", "eye_model.keras", "eye")
 
 
 def main_yawn():
     config = load_config()
-    _evaluate(config, config["yawn_model"], "yawn_manifest.csv", "yawn_model.keras", "yawn_")
+    _evaluate(config, config["yawn_model"], "yawn_manifest.csv", "yawn_model.keras", "yawn")
 
 
 if __name__ == "__main__":

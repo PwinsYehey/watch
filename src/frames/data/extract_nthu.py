@@ -77,8 +77,8 @@ def main():
 
     config = load_config()
     raw_dir = Path(config["paths"]["raw_dir"])
-    source_dir = raw_dir / "nthu_ddd" / "train"
-    output_dir = raw_dir / "nthu_eye"
+    source_dir = raw_dir / "eye" / "nthu_ddd" / "train"
+    output_dir = raw_dir / "eye" / "nthu_eye"
 
     extract_nthu_images(source_dir, output_dir)
 

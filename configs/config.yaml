@@ -13,20 +13,20 @@ paths:
 datasets:
   # Each dataset gets its own raw subfolder under paths.raw_dir.
   mrl_eye:
-    raw_subdir: mrl_eye
+    raw_subdir: eye/mrl_eye
     enabled: true
   cew:
-    raw_subdir: cew
+    raw_subdir: eye/cew
     enabled: true
   nthu_eye:
-    # Real subject ids from NTHU-DDD, extracted via cli/extract_nthu.py; adds glasses-wearing subject diversity MRL/CEW lack.
-    raw_subdir: nthu_eye
+    # Real subject ids from NTHU-DDD, extracted via cli/eye/extract_nthu.py; adds glasses-wearing subject diversity MRL/CEW lack.
+    raw_subdir: eye/nthu_eye
     enabled: true
 
 yawn_dataset:
   yawdd:
-    # Real subject ids from the YawDD Mirror set, extracted via cli/extract_yawdd.py.
-    raw_subdir: yawdd
+    # Real subject ids from the YawDD Mirror set, extracted via cli/yawn/extract_yawdd.py.
+    raw_subdir: yawn/yawdd
     enabled: true
 
 split:

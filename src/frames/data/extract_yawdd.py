@@ -71,8 +71,8 @@ def main():
 
     config = load_config()
     raw_dir = Path(config["paths"]["raw_dir"])
-    mirror_dir = raw_dir / "yawdd_videos" / "Mirror"
-    output_dir = raw_dir / "yawdd"
+    mirror_dir = raw_dir / "yawn" / "yawdd_videos" / "Mirror"
+    output_dir = raw_dir / "yawn" / "yawdd"
 
     extract_mirror_videos(mirror_dir, output_dir)
 

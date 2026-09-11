@@ -102,7 +102,7 @@ def build_yawdd_manifest(raw_dir: str | Path) -> pd.DataFrame:
 
 
 def build_nthu_eye_manifest(raw_dir: str | Path) -> pd.DataFrame:
-    """Parses '<subjectId>_<glasses>_<scenario>_<frameIdx>_<side>.jpg', eye crops extracted via cli/extract_nthu.py from the real NTHU-DDD subject ids."""
+    """Parses '<subjectId>_<glasses>_<scenario>_<frameIdx>_<side>.jpg', eye crops extracted via cli/eye/extract_nthu.py from the real NTHU-DDD subject ids."""
     root = Path(raw_dir)
     rows = []
 

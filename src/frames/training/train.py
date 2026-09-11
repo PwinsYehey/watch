@@ -8,7 +8,7 @@ from frames.data.generators import make_generators
 from frames.models.build_model import build_model
 
 
-def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: str, checkpoint_name: str, history_name: str):
+def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: str, checkpoint_name: str, results_subdir: str):
     tf.keras.utils.set_random_seed(config["project"]["seed"])
     image_size = tuple(config["preprocessing"]["image_size"])
 
@@ -49,9 +49,9 @@ def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: st
         verbose=1,
     )
 
-    results_dir = Path(config["paths"]["results_dir"])
+    results_dir = Path(config["paths"]["results_dir"]) / results_subdir
     results_dir.mkdir(parents=True, exist_ok=True)
-    history_path = results_dir / history_name
+    history_path = results_dir / "training_history.csv"
     pd.DataFrame(history.history).to_csv(history_path, index=False)
 
     print(f"\nBest model saved to: {checkpoint_path}")
@@ -60,12 +60,12 @@ def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: st
 
 def main():
     config = load_config()
-    _train(config, config["model"], config["training"], "manifest.csv", "eye_model.keras", "eye_training_history.csv")
+    _train(config, config["model"], config["training"], "manifest.csv", "eye_model.keras", "eye")
 
 
 def main_yawn():
     config = load_config()
-    _train(config, config["yawn_model"], config["yawn_training"], "yawn_manifest.csv", "yawn_model.keras", "yawn_training_history.csv")
+    _train(config, config["yawn_model"], config["yawn_training"], "yawn_manifest.csv", "yawn_model.keras", "yawn")
 
 
 if __name__ == "__main__":
