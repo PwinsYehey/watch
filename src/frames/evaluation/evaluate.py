@@ -39,7 +39,7 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
     plt.savefig(results_dir / f"{output_prefix}confusion_matrix.png", dpi=300)
     plt.close()
 
-    positive_index = 1  # class_names[1], e.g. "open" or "yawn"
+    positive_index = 1  # class_names[1], e.g. "eyes_opened" or "yawn"
     y_score = predictions[:, positive_index]
     y_true_binary = (y_true == positive_index).astype(int)
     fpr, tpr, _ = roc_curve(y_true_binary, y_score)

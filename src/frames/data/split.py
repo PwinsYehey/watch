@@ -31,11 +31,14 @@ def split_manifest(manifest: pd.DataFrame, ratios: dict, seed: int = 42, force_s
     manifest["group_id"] = manifest["dataset"] + "::" + manifest["subject_id"].astype(str)
 
     majority_label = manifest.groupby("group_id")["label"].agg(lambda s: s.mode().iat[0])
+    dataset_of_group = manifest.groupby("group_id")["dataset"].first()
 
     rng = np.random.default_rng(seed)
     assignment: dict[str, str] = {}
-    for label, subjects_for_label in majority_label.groupby(majority_label):
-        assignment.update(_assign_subject_splits(list(subjects_for_label.index), ratios, rng))
+    # stratify by (dataset, label) so each dataset keeps its own ratio in every split
+    strata = pd.DataFrame({"dataset": dataset_of_group, "label": majority_label})
+    for _key, subjects_for_group in strata.groupby(["dataset", "label"]):
+        assignment.update(_assign_subject_splits(list(subjects_for_group.index), ratios, rng))
 
     if force_split:
         assignment.update(force_split)

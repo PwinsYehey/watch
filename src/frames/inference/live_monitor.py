@@ -96,10 +96,10 @@ def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size,
     ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
     # no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
     closedness = max(ear_closedness, cnn_closedness)
-    label = "closed" if closedness >= 0.5 else "open"
+    label = "closed" if closedness >= 0.5 else "eyes_opened"
 
     connections = _LEFT_EYE_CONNECTIONS if side == "left" else _RIGHT_EYE_CONNECTIONS
-    _draw_contour(frame, landmarks, connections, _OPEN_COLOR if label == "open" else _CLOSED_COLOR)
+    _draw_contour(frame, landmarks, connections, _OPEN_COLOR if label == "eyes_opened" else _CLOSED_COLOR)
     return {"closedness": closedness, "label": label, "ear": region.ear, "cnn_closedness": cnn_closedness}
 
 
@@ -145,9 +145,9 @@ def _draw_status_panel(frame, left: dict | None, right: dict | None, mouth: dict
     """A single fixed panel for all per-cue readouts, so labels never overlap regardless of face size/position."""
     lines = []
     if left:
-        lines.append((f"left eye: {left['label']} {left['closedness'] * 100:.0f}% | EAR {left['ear']:.2f}", _OPEN_COLOR if left["label"] == "open" else _CLOSED_COLOR))
+        lines.append((f"left eye: {left['label']} {left['closedness'] * 100:.0f}% | EAR {left['ear']:.2f}", _OPEN_COLOR if left["label"] == "eyes_opened" else _CLOSED_COLOR))
     if right:
-        lines.append((f"right eye: {right['label']} {right['closedness'] * 100:.0f}% | EAR {right['ear']:.2f}", _OPEN_COLOR if right["label"] == "open" else _CLOSED_COLOR))
+        lines.append((f"right eye: {right['label']} {right['closedness'] * 100:.0f}% | EAR {right['ear']:.2f}", _OPEN_COLOR if right["label"] == "eyes_opened" else _CLOSED_COLOR))
     if mouth:
         lines.append((f"mouth: {mouth['label']} {mouth['openness'] * 100:.0f}% | MAR {mouth['mar']:.2f}", _CLOSED_COLOR if mouth["label"] == "yawn" else _MOUTH_COLOR))
     if head:

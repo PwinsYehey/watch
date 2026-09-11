@@ -33,7 +33,7 @@ def build_mrl_eye_manifest(raw_dir: str | Path) -> pd.DataFrame:
                 "filepath": str(path),
                 "dataset": "mrl_eye",
                 "subject_id": subject_id,
-                "label": "open" if eyestate == "1" else "closed",
+                "label": "eyes_opened" if eyestate == "1" else "closed",
             }
         )
 
@@ -61,7 +61,7 @@ def build_cew_manifest(raw_dir: str | Path) -> pd.DataFrame:
         if "closed" in path_lower:
             label = "closed"
         elif "open" in path_lower:
-            label = "open"
+            label = "eyes_opened"
         else:
             skipped += 1
             continue
@@ -106,7 +106,7 @@ def build_nthu_eye_manifest(raw_dir: str | Path) -> pd.DataFrame:
     root = Path(raw_dir)
     rows = []
 
-    for label, subdir in [("open", "open"), ("closed", "closed")]:
+    for label, subdir in [("eyes_opened", "open"), ("closed", "closed")]:
         for path in sorted((root / subdir).glob("*.jpg")):
             subject_id, glasses = path.stem.split("_")[0], path.stem.split("_")[1]
             rows.append(
