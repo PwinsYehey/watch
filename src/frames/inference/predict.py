@@ -26,7 +26,7 @@ def _predict_class_state(model, crop_bgr: np.ndarray, image_size: tuple, class_n
 
 def predict_eye_state(model, eye_crop_bgr: np.ndarray, image_size: tuple, class_names: list[str]):
     # desaturate first -- the eye CNN's training data is almost entirely near-grayscale
-    return _predict_class_state(model, eye_crop_bgr, image_size, class_names, positive_class="closed", desaturate=True)
+    return _predict_class_state(model, eye_crop_bgr, image_size, class_names, positive_class="eyes_closed", desaturate=True)
 
 
 def predict_yawn_state(model, mouth_crop_bgr: np.ndarray, image_size: tuple, class_names: list[str]):

@@ -96,7 +96,7 @@ def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size,
     ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
     # no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
     closedness = max(ear_closedness, cnn_closedness)
-    label = "closed" if closedness >= 0.5 else "eyes_opened"
+    label = "eyes_closed" if closedness >= 0.5 else "eyes_opened"
 
     connections = _LEFT_EYE_CONNECTIONS if side == "left" else _RIGHT_EYE_CONNECTIONS
     _draw_contour(frame, landmarks, connections, _OPEN_COLOR if label == "eyes_opened" else _CLOSED_COLOR)
