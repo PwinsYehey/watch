@@ -13,6 +13,17 @@ pip install -r requirements.txt -e .
 
 `cli/live.py` needs a camera, so run it from a native Windows Python install (with `opencv-python` instead of `opencv-python-headless`), not WSL.
 
+### Just running live.py (no training/data pipeline)
+
+Integrating `live.py` with hardware doesn't need pandas/scikit-learn/matplotlib/etc. Sa PC ko lahat ng preprocessing, training, fine tuning
+
+```bash
+python -m venv .venv-win
+.venv-win\Scripts\activate
+pip install -r requirements-live.txt -e .
+python cli\live.py
+```
+
 ## Run
 
 ```bash
