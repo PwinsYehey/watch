@@ -60,12 +60,12 @@ def _train(config: dict, model_cfg: dict, train_cfg: dict, manifest_filename: st
 
 def main():
     config = load_config()
-    _train(config, config["model"], config["training"], "manifest.csv", "best_eye_model.keras", "training_history.csv")
+    _train(config, config["model"], config["training"], "manifest.csv", "eye_model.keras", "eye_training_history.csv")
 
 
 def main_yawn():
     config = load_config()
-    _train(config, config["yawn_model"], config["yawn_training"], "yawn_manifest.csv", "best_yawn_model.keras", "yawn_training_history.csv")
+    _train(config, config["yawn_model"], config["yawn_training"], "yawn_manifest.csv", "yawn_model.keras", "yawn_training_history.csv")
 
 
 if __name__ == "__main__":

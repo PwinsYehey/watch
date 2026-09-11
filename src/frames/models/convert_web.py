@@ -63,8 +63,8 @@ def main():
     models_dir = Path(config["paths"]["models_dir"])
     web_models_dir = PROJECT_ROOT / "web" / "models"
 
-    convert_to_tfjs(models_dir / "best_eye_model.keras", web_models_dir / "eye")
-    convert_to_tfjs(models_dir / "best_yawn_model.keras", web_models_dir / "yawn")
+    convert_to_tfjs(models_dir / "eye_model.keras", web_models_dir / "eye")
+    convert_to_tfjs(models_dir / "yawn_model.keras", web_models_dir / "yawn")
 
 
 if __name__ == "__main__":

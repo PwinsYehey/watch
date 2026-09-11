@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers
 
 
-def load_trained_model(config: dict, checkpoint_name: str = "best_eye_model.keras") -> tf.keras.Model:
+def load_trained_model(config: dict, checkpoint_name: str = "eye_model.keras") -> tf.keras.Model:
     """Loads a model checkpoint, raising a helpful error if it hasn't been trained yet."""
     model_path = Path(config["paths"]["models_dir"]) / checkpoint_name
     if not model_path.exists():

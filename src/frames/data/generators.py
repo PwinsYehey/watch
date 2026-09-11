@@ -9,7 +9,8 @@ from frames.config import PROJECT_ROOT
 def load_split_manifest(splits_dir: str | Path, filename: str = "manifest.csv") -> pd.DataFrame:
     path = Path(splits_dir) / filename
     if not path.exists():
-        raise FileNotFoundError(f"{path} not found -- run `python cli/make_splits.py` first.")
+        split_script = "make_yawn_splits.py" if filename.startswith("yawn_") else "make_eye_splits.py"
+        raise FileNotFoundError(f"{path} not found -- run `python cli/{split_script}` first.")
     manifest = pd.read_csv(path)
     # manifest.csv stores paths relative to the project root so it's portable across machines/clones
     manifest["filepath"] = manifest["filepath"].apply(lambda p: str(PROJECT_ROOT / p))

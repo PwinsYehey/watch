@@ -75,12 +75,12 @@ def _evaluate(config: dict, model_cfg: dict, manifest_filename: str, checkpoint_
 
 def main():
     config = load_config()
-    _evaluate(config, config["model"], "manifest.csv", "best_eye_model.keras", "")
+    _evaluate(config, config["model"], "manifest.csv", "eye_model.keras", "eye_")
 
 
 def main_yawn():
     config = load_config()
-    _evaluate(config, config["yawn_model"], "yawn_manifest.csv", "best_yawn_model.keras", "yawn_")
+    _evaluate(config, config["yawn_model"], "yawn_manifest.csv", "yawn_model.keras", "yawn_")
 
 
 if __name__ == "__main__":

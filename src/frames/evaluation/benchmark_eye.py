@@ -55,8 +55,8 @@ def main():
 
     results_dir = Path(config["paths"]["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([result]).to_csv(results_dir / "benchmark.csv", index=False)
-    print(f"\nSaved to: {results_dir / 'benchmark.csv'}")
+    pd.DataFrame([result]).to_csv(results_dir / "eye_benchmark.csv", index=False)
+    print(f"\nSaved to: {results_dir / 'eye_benchmark.csv'}")
 
 
 if __name__ == "__main__":

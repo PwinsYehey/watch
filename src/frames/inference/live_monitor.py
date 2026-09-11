@@ -177,7 +177,7 @@ def main():
     nod_cfg = config["nod"]
 
     model = load_trained_model(config)
-    yawn_model = load_trained_model(config, checkpoint_name="best_yawn_model.keras")
+    yawn_model = load_trained_model(config, checkpoint_name="yawn_model.keras")
 
     eye_monitor = _build_monitor(alertness_cfg)
     yawn_monitor = _build_monitor(yawn_cfg)
