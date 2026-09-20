@@ -36,15 +36,32 @@ _BANNER_TEXT = {
 }
 
 
-def _remove_glare(image: np.ndarray) -> np.ndarray:
-    """Inpaints out bright, washed-out specular highlights (e.g. reflections off a clear visor) before tracking landmarks."""
+_EAR_GLARE_TOLERANCE = 0.15
+
+
+def _glare_mask(image: np.ndarray) -> np.ndarray:
+    """Boolean mask of bright, washed-out (near-white, low-saturation) pixels -- e.g. visor glare."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     brightness, saturation = hsv[:, :, 2], hsv[:, :, 1]
-    mask = ((brightness > 235) & (saturation < 60)).astype(np.uint8) * 255
+    return (brightness > 235) & (saturation < 60)
+
+
+def _remove_glare(image: np.ndarray) -> np.ndarray:
+    """Inpaints out bright, washed-out specular highlights (e.g. reflections off a clear visor) before tracking landmarks."""
+    mask = _glare_mask(image).astype(np.uint8) * 255
     if not mask.any():
         return image
     mask = cv2.dilate(mask, np.ones((3, 3), np.uint8))
     return cv2.inpaint(image, mask, 3, cv2.INPAINT_TELEA)
+
+
+def _glare_fraction(image, box: tuple[int, int, int, int]) -> float:
+    """Fraction of a region (e.g. one eye's box, on the ORIGINAL uncleaned frame) that was glare."""
+    x_min, y_min, x_max, y_max = box
+    region = image[y_min:y_max, x_min:x_max]
+    if region.size == 0:
+        return 0.0
+    return float(_glare_mask(region).mean())
 
 
 def _linear_score(value: float, low_at_zero: float, high_at_one: float) -> float:
@@ -105,7 +122,8 @@ def _draw_contour(frame, landmarks, connections, color):
 
 def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg, smoother: RollingMedian) -> dict:
     _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
-    ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
+    glare_fraction = _glare_fraction(frame, region.box)
+    ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] and glare_fraction < _EAR_GLARE_TOLERANCE else 0.0
     # no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
     raw_closedness = max(ear_closedness, cnn_closedness)
     # smoothed per-eye so a single glare-jittered frame under a reflective visor can't flip the on-screen label

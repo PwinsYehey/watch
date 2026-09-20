@@ -56,10 +56,7 @@ function removeGlare(sourceCanvas, targetCtx) {
   const blurData = blurred.data;
 
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    // glare is bright and washed-out (low saturation), unlike genuine skin/eye color
-    if (max > 235 && max - min < 60) {
+    if (isGlarePixel(data[i], data[i + 1], data[i + 2])) {
       data[i] = blurData[i];
       data[i + 1] = blurData[i + 1];
       data[i + 2] = blurData[i + 2];
@@ -67,6 +64,29 @@ function removeGlare(sourceCanvas, targetCtx) {
   }
 
   targetCtx.putImageData(sharp, 0, 0);
+}
+
+// glare is bright and washed-out (low saturation), unlike genuine skin/eye color
+function isGlarePixel(r, g, b) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  return max > 235 && max - min < 60;
+}
+
+const EAR_GLARE_TOLERANCE = 0.15;
+
+// mirrors _glare_fraction in live_monitor.py -- fraction of a box on the ORIGINAL uncleaned frame that was glare
+function glareFraction(box) {
+  const x = Math.max(0, Math.floor(box.xMin));
+  const y = Math.max(0, Math.floor(box.yMin));
+  const w = Math.max(0, Math.ceil(box.xMax) - x);
+  const h = Math.max(0, Math.ceil(box.yMax) - y);
+  if (w <= 0 || h <= 0) return 0.0;
+  const { data } = mirrorCtx.getImageData(x, y, w, h);
+  let glareCount = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (isGlarePixel(data[i], data[i + 1], data[i + 2])) glareCount++;
+  }
+  return glareCount / (data.length / 4);
 }
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
@@ -233,7 +253,9 @@ function ensureBlazeface() {
 
 async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
   const { positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
-  const earClosedness = ear <= earCfg.closedThreshold ? 1.0 : 0.0;
+  // a heavily glared eye region corrupts EAR's precise landmark geometry more than the CNN's holistic read,
+  // so a strong glare patch on one side of the eye no longer forces a false "eyes_closed" through the EAR side of the max() below
+  const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < EAR_GLARE_TOLERANCE ? 1.0 : 0.0;
   // no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
   const rawClosedness = Math.max(earClosedness, cnnClosedness);
   // smoothed per-eye so a single glare-jittered frame under a reflective visor can't flip the on-screen label
