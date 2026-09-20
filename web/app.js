@@ -88,6 +88,33 @@ function glareFraction(box) {
   }
   return glareCount / (data.length / 4);
 }
+
+const LOW_DETAIL_STD_THRESHOLD = 12.0;
+
+// mirrors _is_low_detail in facemesh.py -- true if a box is too flat/featureless to be real facial
+// detail (e.g. a solid patch of opaque tinted visor), checked on the crop the model would actually see
+function isLowDetail(box) {
+  const x = Math.max(0, Math.floor(box.xMin));
+  const y = Math.max(0, Math.floor(box.yMin));
+  const w = Math.max(0, Math.ceil(box.xMax) - x);
+  const h = Math.max(0, Math.ceil(box.yMax) - y);
+  if (w <= 0 || h <= 0) return true;
+  const { data } = glareCleanCtx.getImageData(x, y, w, h);
+  const n = data.length / 4;
+  const grays = new Float64Array(n);
+  let sum = 0;
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    // matches cv2.cvtColor's BGR2GRAY luma weights
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    grays[j] = gray;
+    sum += gray;
+  }
+  const mean = sum / n;
+  let variance = 0;
+  for (let j = 0; j < n; j++) variance += (grays[j] - mean) ** 2;
+  return Math.sqrt(variance / n) < LOW_DETAIL_STD_THRESHOLD;
+}
+
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
 const startBtnLabel = document.getElementById("startBtnLabel");
@@ -189,6 +216,7 @@ async function predictClassState(model, sourceCanvas, box, classNames, positiveC
 
 let drawingUtils = null;
 let earCfg = CONFIG.ear;
+let headPoseCfg = CONFIG.headPose;
 
 let modelsPromise = null;
 function ensureModels() {
@@ -280,8 +308,8 @@ async function drawMouth(box, mar, model, landmarks) {
 
 function headPoseStatus(pitch, roll, landmarks) {
   if (pitch === null || roll === null) return null;
-  const pitchDroop = linearScore(pitch, CONFIG.headPose.uprightThreshold, CONFIG.headPose.droopedThreshold);
-  const rollDroop = linearScore(roll, CONFIG.headPose.rollUprightThreshold, CONFIG.headPose.rollDroopedThreshold);
+  const pitchDroop = linearScore(pitch, headPoseCfg.uprightThreshold, headPoseCfg.droopedThreshold);
+  const rollDroop = linearScore(roll, headPoseCfg.rollUprightThreshold, headPoseCfg.rollDroopedThreshold);
   // either a forward nod or a sideways tilt toward the shoulder counts as drooping
   const droop = Math.max(pitchDroop, rollDroop);
   const label = droop >= 0.5 ? "nodding" : "upright";
@@ -323,8 +351,10 @@ function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   });
 }
 
-async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
-  const samples = [];
+async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffset, rollDroopedOffset) {
+  const earSamples = [];
+  const pitchSamples = [];
+  const rollSamples = [];
   const start = performance.now();
   while (performance.now() - start < durationSec * 1000) {
     updateMirror();
@@ -333,8 +363,13 @@ async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
     ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
-      samples.push(eyeAspectRatio(lm, canvas.width, canvas.height, LEFT_EYE_EAR_POINTS));
-      samples.push(eyeAspectRatio(lm, canvas.width, canvas.height, RIGHT_EYE_EAR_POINTS));
+      earSamples.push(eyeAspectRatio(lm, canvas.width, canvas.height, LEFT_EYE_EAR_POINTS));
+      earSamples.push(eyeAspectRatio(lm, canvas.width, canvas.height, RIGHT_EYE_EAR_POINTS));
+      if (result.facialTransformationMatrixes.length) {
+        const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+        pitchSamples.push(headPose.pitch);
+        rollSamples.push(headPose.roll);
+      }
     }
     const remaining = durationSec - (performance.now() - start) / 1000;
     ctx.fillStyle = "#00c8ff";
@@ -345,9 +380,21 @@ async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
     await new Promise((r) => requestAnimationFrame(r));
   }
 
-  if (samples.length < 10) return null;
-  const baseline = median(samples);
-  return { openThreshold: baseline, closedThreshold: baseline - closedOffset };
+  if (earSamples.length < 10) return null;
+  const earBaseline = median(earSamples);
+  const result = { ear: { openThreshold: earBaseline, closedThreshold: earBaseline - closedOffset } };
+
+  if (pitchSamples.length >= 10) {
+    const pitchBaseline = median(pitchSamples);
+    const rollBaseline = median(rollSamples);
+    result.headPose = {
+      uprightThreshold: pitchBaseline,
+      droopedThreshold: pitchBaseline + droopedOffset,
+      rollUprightThreshold: rollBaseline,
+      rollDroopedThreshold: rollBaseline + rollDroopedOffset,
+    };
+  }
+  return result;
 }
 
 async function main() {
@@ -383,6 +430,7 @@ async function main() {
 
   statusEl.textContent = "";
   earCfg = CONFIG.ear;
+  headPoseCfg = CONFIG.headPose;
   let paused = false;
   let noFaceSince = null;
 
@@ -390,12 +438,19 @@ async function main() {
     // pause the main render loop so it doesn't fight the calibration overlay for the same canvas
     paused = true;
     stopAlarm();
-    const calibrated = await calibrateEar(faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset);
+    const calibrated = await calibrate(
+      faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
+      CONFIG.calibration.droopedOffset, CONFIG.calibration.rollDroopedOffset,
+    );
     if (calibrated) {
-      earCfg = calibrated;
+      earCfg = calibrated.ear;
       statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
+      if (calibrated.headPose) {
+        headPoseCfg = calibrated.headPose;
+        statusEl.textContent += ` | head-pose: upright<=${headPoseCfg.uprightThreshold.toFixed(1)}, drooped>=${headPoseCfg.droopedThreshold.toFixed(1)}`;
+      }
     } else {
-      statusEl.textContent = "Calibration failed (no face detected) -- using default EAR thresholds.";
+      statusEl.textContent = "Calibration failed (no face detected) -- using default EAR/head-pose thresholds.";
     }
     paused = false;
   }
@@ -468,23 +523,31 @@ async function main() {
 
         const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
         const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-        const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
-        const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
-        const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
+        const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
+        const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
+        const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
+        // drop a region individually (not just when the crop geometry fails, but also when the crop is too
+        // flat/featureless to be real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame
+        const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
+        const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
+        const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
 
-        if (leftBox && rightBox) {
+        if (leftBox || rightBox) {
           // run all CNN calls concurrently instead of awaiting each GPU round-trip in turn
-          const calls = [
-            drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother),
-            drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother),
-          ];
-          // a lost mouth box (heavy occlusion/glare) no longer discards the eyes/head for this frame
+          const calls = [];
+          if (leftBox) calls.push(drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother));
+          if (rightBox) calls.push(drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother));
           if (mouthBox) calls.push(drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm));
           const results = await Promise.all(calls);
-          [leftResult, rightResult] = results;
-          mouthResult = mouthBox ? results[2] : null;
-          // average both eyes so one drooping eyelid still raises the score
-          eyeClosedness = (leftResult.closedness + rightResult.closedness) / 2;
+          let idx = 0;
+          if (leftBox) leftResult = results[idx++];
+          if (rightBox) rightResult = results[idx++];
+          if (mouthBox) mouthResult = results[idx++];
+
+          const eyeReadings = [leftResult, rightResult].filter(Boolean);
+          // average both eyes so one drooping eyelid still raises the score; if neither eye is readable
+          // (e.g. an opaque tinted visor), report no reading rather than fabricating one
+          eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
           mouthOpenness = mouthResult ? mouthResult.openness : null;
           if (result.facialTransformationMatrixes.length) {
             const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
@@ -650,28 +713,33 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   const lm = result.faceLandmarks[0];
   const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
   const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-  const leftBox = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
-  const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
-  const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
+  const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
+  const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
+  const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
+  // drop a region individually (not just when the crop geometry fails, but also when the crop is too
+  // flat/featureless to be real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame
+  const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
+  const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
+  const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
 
-  if (!leftBox || !rightBox) {
+  if (!leftBox && !rightBox) {
     finalBlit();
     drawSnapshotBanner("no_face");
     return;
   }
 
-  const left = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
-  const right = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
-  // a lost mouth box (heavy occlusion/glare) no longer discards the eyes/head reading
+  const left = leftBox ? await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm) : null;
+  const right = rightBox ? await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm) : null;
   const mouth = mouthBox ? await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
     const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
     head = headPoseStatus(headPose.pitch, headPose.roll, lm);
   }
-  const eyeClosedness = (left.closedness + right.closedness) / 2;
+  const eyeReadings = [left, right].filter(Boolean);
+  const eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
   const notAlert =
-    eyeClosedness >= CONFIG.alertness.closednessThreshold ||
+    (eyeClosedness !== null && eyeClosedness >= CONFIG.alertness.closednessThreshold) ||
     (mouth !== null && mouth.openness >= CONFIG.yawn.closednessThreshold) ||
     (head !== null && head.droop >= CONFIG.nod.closednessThreshold);
 

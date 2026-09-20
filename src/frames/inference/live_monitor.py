@@ -84,9 +84,12 @@ def _build_monitor(cfg: dict) -> AlertnessMonitor:
     )
 
 
-def _calibrate_ear(cap, tracker, duration_sec: float, closed_offset: float) -> dict | None:
-    """Measures this user's own open-eye EAR for a few seconds so thresholds fit their eye shape, not a population average."""
-    samples = []
+def _calibrate(cap, tracker, duration_sec: float, closed_offset: float, drooped_offset: float, roll_drooped_offset: float) -> dict | None:
+    """Measures this user's own open-eye EAR and neutral head pose for a few seconds, so thresholds fit their eye
+    shape and resting posture (e.g. a helmet's weight/fit can shift head angle) rather than a population average."""
+    ear_samples = []
+    pitch_samples = []
+    roll_samples = []
     start = time.time()
     while time.time() - start < duration_sec:
         ok, frame = cap.read()
@@ -95,7 +98,10 @@ def _calibrate_ear(cap, tracker, duration_sec: float, closed_offset: float) -> d
         frame = cv2.flip(frame, 1)
         regions = tracker.extract(_remove_glare(frame))
         if regions is not None:
-            samples.extend(eye.ear for eye in regions.eyes.values())
+            ear_samples.extend(eye.ear for eye in regions.eyes.values())
+            if regions.pitch is not None and regions.roll is not None:
+                pitch_samples.append(regions.pitch)
+                roll_samples.append(regions.roll)
 
         remaining = duration_sec - (time.time() - start)
         cv2.putText(frame, "Calibrating -- look at the camera normally", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
@@ -103,11 +109,22 @@ def _calibrate_ear(cap, tracker, duration_sec: float, closed_offset: float) -> d
         cv2.imshow("FRAMES - Live Alertness Monitoring (press q to quit)", frame)
         cv2.waitKey(1)
 
-    if len(samples) < 10:
+    if len(ear_samples) < 10:
         return None
 
-    baseline = statistics.median(samples)
-    return {"open_threshold": baseline, "closed_threshold": baseline - closed_offset}
+    ear_baseline = statistics.median(ear_samples)
+    result = {"ear": {"open_threshold": ear_baseline, "closed_threshold": ear_baseline - closed_offset}}
+
+    if len(pitch_samples) >= 10:
+        pitch_baseline = statistics.median(pitch_samples)
+        roll_baseline = statistics.median(roll_samples)
+        result["head_pose"] = {
+            "upright_threshold": pitch_baseline,
+            "drooped_threshold": pitch_baseline + drooped_offset,
+            "roll_upright_threshold": roll_baseline,
+            "roll_drooped_threshold": roll_baseline + roll_drooped_offset,
+        }
+    return result
 
 
 def _draw_contour(frame, landmarks, connections, color):
@@ -229,13 +246,22 @@ def main():
     prev_time = time.time()
 
     def run_calibration():
-        nonlocal ear_cfg
-        calibrated = _calibrate_ear(cap, tracker, calibration_cfg["duration_sec"], calibration_cfg["closed_offset"])
+        nonlocal ear_cfg, head_pose_cfg
+        calibrated = _calibrate(
+            cap, tracker, calibration_cfg["duration_sec"], calibration_cfg["closed_offset"],
+            calibration_cfg.get("drooped_offset", 12.0), calibration_cfg.get("roll_drooped_offset", 30.0),
+        )
         if calibrated is not None:
-            ear_cfg = calibrated
+            ear_cfg = calibrated["ear"]
             print(f"Calibrated EAR thresholds: open>={ear_cfg['open_threshold']:.2f}, closed<={ear_cfg['closed_threshold']:.2f}")
+            if "head_pose" in calibrated:
+                head_pose_cfg = calibrated["head_pose"]
+                print(
+                    f"Calibrated head-pose thresholds: upright<={head_pose_cfg['upright_threshold']:.1f}, "
+                    f"drooped>={head_pose_cfg['drooped_threshold']:.1f}"
+                )
         else:
-            print("Calibration failed (no face detected) -- using default EAR thresholds.")
+            print("Calibration failed (no face detected) -- using default EAR/head-pose thresholds.")
 
     with EyeRegionTracker(static_image_mode=False) as tracker:
         run_calibration()
@@ -269,8 +295,9 @@ def main():
                         )
                         for side, eye in regions.eyes.items()
                     }
-                    # average both eyes so one drooping eyelid still raises the score
-                    eye_closedness = sum(r["closedness"] for r in eye_results.values()) / len(eye_results)
+                    # average both eyes so one drooping eyelid still raises the score; if neither eye is readable
+                    # (e.g. an opaque tinted visor), report no reading rather than fabricating one
+                    eye_closedness = sum(r["closedness"] for r in eye_results.values()) / len(eye_results) if eye_results else None
                     if regions.mouth is not None:
                         mouth_result = _draw_mouth(frame, regions.mouth, regions.landmarks, yawn_model, image_size, yawn_class_names, mar_cfg)
                         mouth_openness = mouth_result["openness"]

@@ -56,6 +56,14 @@ class FaceRegions:
     landmarks: object
 
 
+_LOW_DETAIL_STD_THRESHOLD = 12.0
+
+
+def _is_low_detail(crop: np.ndarray) -> bool:
+    """True if a crop is too flat/featureless to be real facial detail -- e.g. a solid patch of opaque tinted visor."""
+    return float(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).std()) < _LOW_DETAIL_STD_THRESHOLD
+
+
 def _crop_from_landmarks(image: np.ndarray, landmarks, ids: list[int], margin: float, square: bool = False):
     """Returns (crop, (x_min, y_min, x_max, y_max)), or None if the box is degenerate."""
     h, w = image.shape[:2]
@@ -155,8 +163,9 @@ class EyeRegionTracker:
         )
 
     def extract(self, image_bgr: np.ndarray) -> FaceRegions | None:
-        """Returns a FaceRegions with both eyes and head pitch, or None if no face could be located. The mouth is
-        optional -- a lost mouth crop (heavy occlusion/glare) no longer discards the eyes and head for that frame."""
+        """Returns a FaceRegions, or None if no face could be located at all. Eyes and mouth are each dropped
+        individually (not just when the crop geometry fails, but also when the crop is too flat/featureless to be
+        real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame for one bad region."""
         h, w = image_bgr.shape[:2]
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         results = self._face_mesh.process(image_rgb)
@@ -169,16 +178,16 @@ class EyeRegionTracker:
         right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS, margin=0.15, square=True)
         mouth = _crop_from_landmarks(image_bgr, landmarks, _MOUTH_IDS, margin=0.3)
 
-        if left is None or right is None:
-            return None
-
-        left_crop, left_box = left
-        right_crop, right_box = right
-        left_ear = _eye_aspect_ratio(landmarks, w, h, _LEFT_EYE_EAR_POINTS)
-        right_ear = _eye_aspect_ratio(landmarks, w, h, _RIGHT_EYE_EAR_POINTS)
+        eyes = {}
+        if left is not None and not _is_low_detail(left[0]):
+            left_crop, left_box = left
+            eyes["left"] = EyeRegion(crop=left_crop, box=left_box, ear=_eye_aspect_ratio(landmarks, w, h, _LEFT_EYE_EAR_POINTS))
+        if right is not None and not _is_low_detail(right[0]):
+            right_crop, right_box = right
+            eyes["right"] = EyeRegion(crop=right_crop, box=right_box, ear=_eye_aspect_ratio(landmarks, w, h, _RIGHT_EYE_EAR_POINTS))
 
         mouth_region = None
-        if mouth is not None:
+        if mouth is not None and not _is_low_detail(mouth[0]):
             mouth_crop, mouth_box = mouth
             mouth_region = MouthRegion(crop=mouth_crop, box=mouth_box, mar=_mouth_aspect_ratio(landmarks, w, h))
 
@@ -186,10 +195,7 @@ class EyeRegionTracker:
         pitch, roll = pose if pose is not None else (None, None)
 
         return FaceRegions(
-            eyes={
-                "left": EyeRegion(crop=left_crop, box=left_box, ear=left_ear),
-                "right": EyeRegion(crop=right_crop, box=right_box, ear=right_ear),
-            },
+            eyes=eyes,
             mouth=mouth_region,
             pitch=pitch,
             roll=roll,

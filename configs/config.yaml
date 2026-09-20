@@ -90,9 +90,13 @@ ear:
   closed_threshold: 0.10
 
 calibration:
-  # live.py measures each user's own open-eye EAR at startup so the threshold fits their eye shape.
+  # live.py measures each user's own open-eye EAR and neutral head pose at startup, so thresholds fit
+  # their eye shape and resting posture (e.g. a helmet's weight/fit can shift head angle) rather than
+  # the population-average defaults below.
   duration_sec: 4.0
   closed_offset: 0.10
+  drooped_offset: 12.0
+  roll_drooped_offset: 30.0
 
 mar:
   # Mouth Aspect Ratio thresholds -- 0.6 also marks the yawn cutoff used when filtering YawDD frames.
