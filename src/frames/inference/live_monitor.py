@@ -91,11 +91,13 @@ def _draw_contour(frame, landmarks, connections, color):
         cv2.line(frame, pt1, pt2, color, 2)
 
 
-def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg) -> dict:
+def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg, smoother: RollingMedian) -> dict:
     _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
     ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] else 0.0
     # no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
-    closedness = max(ear_closedness, cnn_closedness)
+    raw_closedness = max(ear_closedness, cnn_closedness)
+    # smoothed per-eye so a single glare-jittered frame under a reflective visor can't flip the on-screen label
+    closedness = smoother.add(raw_closedness)
     label = "eyes_closed" if closedness >= 0.5 else "eyes_opened"
 
     connections = _LEFT_EYE_CONNECTIONS if side == "left" else _RIGHT_EYE_CONNECTIONS
@@ -184,6 +186,8 @@ def main():
     nod_monitor = _build_monitor(nod_cfg)
 
     eye_smoother = RollingMedian(5)
+    left_eye_smoother = RollingMedian(5)
+    right_eye_smoother = RollingMedian(5)
     mouth_smoother = RollingMedian(5)
     head_smoother = RollingMedian(5)
 
@@ -229,7 +233,10 @@ def main():
 
                 if regions is not None:
                     eye_results = {
-                        side: _draw_eye(frame, side, eye, regions.landmarks, model, image_size, class_names, ear_cfg)
+                        side: _draw_eye(
+                            frame, side, eye, regions.landmarks, model, image_size, class_names, ear_cfg,
+                            left_eye_smoother if side == "left" else right_eye_smoother,
+                        )
                         for side, eye in regions.eyes.items()
                     }
                     # average both eyes so one drooping eyelid still raises the score
