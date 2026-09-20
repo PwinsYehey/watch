@@ -450,16 +450,20 @@ async function main() {
         const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
         const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
-        if (leftBox && rightBox && mouthBox) {
-          // run all three CNN calls concurrently instead of awaiting each GPU round-trip in turn
-          [leftResult, rightResult, mouthResult] = await Promise.all([
+        if (leftBox && rightBox) {
+          // run all CNN calls concurrently instead of awaiting each GPU round-trip in turn
+          const calls = [
             drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother),
             drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother),
-            drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm),
-          ]);
+          ];
+          // a lost mouth box (heavy occlusion/glare) no longer discards the eyes/head for this frame
+          if (mouthBox) calls.push(drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm));
+          const results = await Promise.all(calls);
+          [leftResult, rightResult] = results;
+          mouthResult = mouthBox ? results[2] : null;
           // average both eyes so one drooping eyelid still raises the score
           eyeClosedness = (leftResult.closedness + rightResult.closedness) / 2;
-          mouthOpenness = mouthResult.openness;
+          mouthOpenness = mouthResult ? mouthResult.openness : null;
           if (result.facialTransformationMatrixes.length) {
             const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
             headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
@@ -628,7 +632,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   const rightBox = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
   const mouthBox = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
 
-  if (!leftBox || !rightBox || !mouthBox) {
+  if (!leftBox || !rightBox) {
     finalBlit();
     drawSnapshotBanner("no_face");
     return;
@@ -636,7 +640,8 @@ async function handleImageUpload(file, alreadyMirrored = false) {
 
   const left = await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm);
   const right = await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm);
-  const mouth = await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm);
+  // a lost mouth box (heavy occlusion/glare) no longer discards the eyes/head reading
+  const mouth = mouthBox ? await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
     const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
@@ -645,7 +650,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   const eyeClosedness = (left.closedness + right.closedness) / 2;
   const notAlert =
     eyeClosedness >= CONFIG.alertness.closednessThreshold ||
-    mouth.openness >= CONFIG.yawn.closednessThreshold ||
+    (mouth !== null && mouth.openness >= CONFIG.yawn.closednessThreshold) ||
     (head !== null && head.droop >= CONFIG.nod.closednessThreshold);
 
   finalBlit();

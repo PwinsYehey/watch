@@ -53,7 +53,7 @@ def extract_mirror_videos(mirror_dir: Path, output_dir: Path) -> None:
                     if frame_idx % stride == 0:
                         regions = tracker.extract(frame)
                         # for "yawning" videos, only the wide-open-mouth frames actually show a yawn
-                        if regions is not None and (category != "yawning" or regions.mouth.mar >= _YAWN_MAR_THRESHOLD):
+                        if regions is not None and regions.mouth is not None and (category != "yawning" or regions.mouth.mar >= _YAWN_MAR_THRESHOLD):
                             out_path = out_dir / f"{subject_id}_{category}_{frame_idx:05d}.jpg"
                             if cv2.imwrite(str(out_path), regions.mouth.crop):
                                 saved += 1

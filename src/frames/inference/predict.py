@@ -59,8 +59,11 @@ def main():
         label, confidence, _closed_probability = predict_eye_state(model, eye.crop, image_size, class_names)
         print(f"{side} eye: {label} ({confidence * 100:.1f}% confidence, EAR={eye.ear:.2f})")
 
-    label, confidence, _yawn_probability = predict_yawn_state(yawn_model, regions.mouth.crop, image_size, yawn_class_names)
-    print(f"mouth: {label} ({confidence * 100:.1f}% confidence, MAR={regions.mouth.mar:.2f})")
+    if regions.mouth is not None:
+        label, confidence, _yawn_probability = predict_yawn_state(yawn_model, regions.mouth.crop, image_size, yawn_class_names)
+        print(f"mouth: {label} ({confidence * 100:.1f}% confidence, MAR={regions.mouth.mar:.2f})")
+    else:
+        print("mouth: not detected (occluded or unreadable)")
     print(f"head pitch: {regions.pitch:.1f} deg" if regions.pitch is not None else "head pitch: unavailable")
 
 

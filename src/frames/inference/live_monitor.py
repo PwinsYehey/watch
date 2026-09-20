@@ -253,8 +253,12 @@ def main():
                     }
                     # average both eyes so one drooping eyelid still raises the score
                     eye_closedness = sum(r["closedness"] for r in eye_results.values()) / len(eye_results)
-                    mouth_result = _draw_mouth(frame, regions.mouth, regions.landmarks, yawn_model, image_size, yawn_class_names, mar_cfg)
-                    mouth_openness = mouth_result["openness"]
+                    if regions.mouth is not None:
+                        mouth_result = _draw_mouth(frame, regions.mouth, regions.landmarks, yawn_model, image_size, yawn_class_names, mar_cfg)
+                        mouth_openness = mouth_result["openness"]
+                    else:
+                        mouth_result = None
+                        mouth_openness = None
                     head_result = _head_pose_status(frame, regions.pitch, regions.roll, regions.landmarks, head_pose_cfg)
                     head_droop = head_result["droop"] if head_result else None
                     _draw_status_panel(frame, eye_results.get("left"), eye_results.get("right"), mouth_result, head_result)

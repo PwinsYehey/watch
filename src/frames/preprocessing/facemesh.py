@@ -50,7 +50,7 @@ class MouthRegion:
 @dataclass
 class FaceRegions:
     eyes: dict[str, EyeRegion]
-    mouth: MouthRegion
+    mouth: MouthRegion | None
     pitch: float | None
     roll: float | None
     landmarks: object
@@ -155,7 +155,8 @@ class EyeRegionTracker:
         )
 
     def extract(self, image_bgr: np.ndarray) -> FaceRegions | None:
-        """Returns a FaceRegions with both eyes, the mouth, and head pitch, or None if no face could be located."""
+        """Returns a FaceRegions with both eyes and head pitch, or None if no face could be located. The mouth is
+        optional -- a lost mouth crop (heavy occlusion/glare) no longer discards the eyes and head for that frame."""
         h, w = image_bgr.shape[:2]
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         results = self._face_mesh.process(image_rgb)
@@ -168,15 +169,19 @@ class EyeRegionTracker:
         right = _crop_from_landmarks(image_bgr, landmarks, _RIGHT_EYE_IDS, margin=0.15, square=True)
         mouth = _crop_from_landmarks(image_bgr, landmarks, _MOUTH_IDS, margin=0.3)
 
-        if left is None or right is None or mouth is None:
+        if left is None or right is None:
             return None
 
         left_crop, left_box = left
         right_crop, right_box = right
-        mouth_crop, mouth_box = mouth
         left_ear = _eye_aspect_ratio(landmarks, w, h, _LEFT_EYE_EAR_POINTS)
         right_ear = _eye_aspect_ratio(landmarks, w, h, _RIGHT_EYE_EAR_POINTS)
-        mar = _mouth_aspect_ratio(landmarks, w, h)
+
+        mouth_region = None
+        if mouth is not None:
+            mouth_crop, mouth_box = mouth
+            mouth_region = MouthRegion(crop=mouth_crop, box=mouth_box, mar=_mouth_aspect_ratio(landmarks, w, h))
+
         pose = _head_pose(landmarks, w, h)
         pitch, roll = pose if pose is not None else (None, None)
 
@@ -185,7 +190,7 @@ class EyeRegionTracker:
                 "left": EyeRegion(crop=left_crop, box=left_box, ear=left_ear),
                 "right": EyeRegion(crop=right_crop, box=right_box, ear=right_ear),
             },
-            mouth=MouthRegion(crop=mouth_crop, box=mouth_box, mar=mar),
+            mouth=mouth_region,
             pitch=pitch,
             roll=roll,
             landmarks=landmarks,
