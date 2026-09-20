@@ -137,8 +137,14 @@ def _draw_contour(frame, landmarks, connections, color):
         cv2.line(frame, pt1, pt2, color, 2)
 
 
-def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg, smoother: RollingMedian) -> dict:
-    _cnn_label, _cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
+_MIN_CNN_CONFIDENCE = 0.65
+
+
+def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size, class_names, ear_cfg, smoother: RollingMedian) -> dict | None:
+    _cnn_label, cnn_confidence, cnn_closedness = predict_eye_state(model, region.crop, image_size, class_names)
+    if cnn_confidence < _MIN_CNN_CONFIDENCE:
+        return None
+
     glare_fraction = _glare_fraction(frame, region.box)
     ear_closedness = 1.0 if region.ear <= ear_cfg["closed_threshold"] and glare_fraction < _EAR_GLARE_TOLERANCE else 0.0
     # no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
@@ -152,8 +158,11 @@ def _draw_eye(frame, side: str, region: EyeRegion, landmarks, model, image_size,
     return {"closedness": closedness, "label": label, "ear": region.ear, "cnn_closedness": cnn_closedness}
 
 
-def _draw_mouth(frame, region: MouthRegion, landmarks, yawn_model, image_size, yawn_class_names, mar_cfg) -> dict:
-    _cnn_label, _cnn_confidence, cnn_openness = predict_yawn_state(yawn_model, region.crop, image_size, yawn_class_names)
+def _draw_mouth(frame, region: MouthRegion, landmarks, yawn_model, image_size, yawn_class_names, mar_cfg) -> dict | None:
+    _cnn_label, cnn_confidence, cnn_openness = predict_yawn_state(yawn_model, region.crop, image_size, yawn_class_names)
+    if cnn_confidence < _MIN_CNN_CONFIDENCE:
+        return None
+
     mar_openness = _linear_score(region.mar, mar_cfg["closed_threshold"], mar_cfg["open_threshold"])
     # either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
     openness = max(cnn_openness, mar_openness)

@@ -279,8 +279,12 @@ function ensureBlazeface() {
   return blazefacePromise;
 }
 
+const MIN_CNN_CONFIDENCE = 0.65;
+
 async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
-  const { positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
+  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
+  if (cnnConfidence < MIN_CNN_CONFIDENCE) return null;
+
   // a heavily glared eye region corrupts EAR's precise landmark geometry more than the CNN's holistic read,
   // so a strong glare patch on one side of the eye no longer forces a false "eyes_closed" through the EAR side of the max() below
   const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < EAR_GLARE_TOLERANCE ? 1.0 : 0.0;
@@ -296,7 +300,11 @@ async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
 }
 
 async function drawMouth(box, mar, model, landmarks) {
-  const { positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.yawnClassNames, "yawn");
+  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.yawnClassNames, "yawn");
+  // the yawn CNN has never seen a hand covering the mouth, so a low-confidence prediction is a sign
+  // this isn't really a mouth at all -- e.g. MediaPipe still guessed a plausible-looking box over a hand
+  if (cnnConfidence < MIN_CNN_CONFIDENCE) return null;
+
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
   // either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
   const openness = Math.max(cnnOpenness, marOpenness);
