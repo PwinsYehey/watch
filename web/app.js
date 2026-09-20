@@ -29,6 +29,45 @@ function updateMirror() {
   mirrorCtx.drawImage(video, -mirrorCanvas.width, 0, mirrorCanvas.width, mirrorCanvas.height);
   mirrorCtx.restore();
 }
+
+// tracking/CNN-input-only copy of the frame with glare smoothed out -- the displayed video (mirrorCanvas/canvas) stays untouched
+const glareCleanCanvas = document.createElement("canvas");
+const glareCleanCtx = glareCleanCanvas.getContext("2d", { willReadFrequently: true });
+const glareBlurCanvas = document.createElement("canvas");
+const glareBlurCtx = glareBlurCanvas.getContext("2d");
+
+// mirrors _remove_glare in live_monitor.py -- smooths out bright, washed-out specular highlights (e.g. visor glare)
+// before landmark tracking; no OpenCV inpaint available in-browser, so a blurred copy stands in for the reconstructed pixels
+function removeGlare(sourceCanvas, targetCtx) {
+  const w = sourceCanvas.width, h = sourceCanvas.height;
+  targetCtx.canvas.width = w;
+  targetCtx.canvas.height = h;
+  targetCtx.drawImage(sourceCanvas, 0, 0);
+
+  glareBlurCanvas.width = w;
+  glareBlurCanvas.height = h;
+  glareBlurCtx.filter = "blur(6px)";
+  glareBlurCtx.drawImage(sourceCanvas, 0, 0);
+  glareBlurCtx.filter = "none";
+
+  const sharp = targetCtx.getImageData(0, 0, w, h);
+  const blurred = glareBlurCtx.getImageData(0, 0, w, h);
+  const data = sharp.data;
+  const blurData = blurred.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    // glare is bright and washed-out (low saturation), unlike genuine skin/eye color
+    if (max > 235 && max - min < 60) {
+      data[i] = blurData[i];
+      data[i + 1] = blurData[i + 1];
+      data[i + 2] = blurData[i + 2];
+    }
+  }
+
+  targetCtx.putImageData(sharp, 0, 0);
+}
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("startBtn");
 const startBtnLabel = document.getElementById("startBtnLabel");
@@ -192,20 +231,22 @@ function ensureBlazeface() {
   return blazefacePromise;
 }
 
-async function drawEye(side, box, ear, model, earCfg, landmarks) {
-  const { positiveProbability: cnnClosedness } = await predictClassState(model, canvas, box, CONFIG.eyeClassNames, "closed", true);
+async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
+  const { positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
   const earClosedness = ear <= earCfg.closedThreshold ? 1.0 : 0.0;
   // no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
-  const closedness = Math.max(earClosedness, cnnClosedness);
-  const label = closedness >= 0.5 ? "closed" : "open";
+  const rawClosedness = Math.max(earClosedness, cnnClosedness);
+  // smoothed per-eye so a single glare-jittered frame under a reflective visor can't flip the on-screen label
+  const closedness = smoother ? smoother.add(rawClosedness) : rawClosedness;
+  const label = closedness >= 0.5 ? "eyes_closed" : "eyes_opened";
 
   const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE : FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
-  drawingUtils.drawConnectors(landmarks, connectors, { color: label === "open" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
+  drawingUtils.drawConnectors(landmarks, connectors, { color: label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
   return { closedness, label, ear, cnnClosedness };
 }
 
 async function drawMouth(box, mar, model, landmarks) {
-  const { positiveProbability: cnnOpenness } = await predictClassState(model, canvas, box, CONFIG.yawnClassNames, "yawn");
+  const { positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.yawnClassNames, "yawn");
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
   // either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
   const openness = Math.max(cnnOpenness, marOpenness);
@@ -243,8 +284,8 @@ function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
 // a single fixed panel for all per-cue readouts, so labels never overlap regardless of face size/position
 function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   const lines = [
-    left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
-    right && { text: `right eye: ${right.label} ${Math.round(right.closedness * 100)}% | EAR ${right.ear.toFixed(2)}`, color: right.label === "open" ? OPEN_COLOR : CLOSED_COLOR },
+    left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR },
+    right && { text: `right eye: ${right.label} ${Math.round(right.closedness * 100)}% | EAR ${right.ear.toFixed(2)}`, color: right.label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR },
     mouth && { text: `mouth: ${mouth.label} ${Math.round(mouth.openness * 100)}% | MAR ${mouth.mar.toFixed(2)}`, color: mouth.label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR },
     head && { text: `head: ${head.label} | pitch ${head.pitch.toFixed(1)} | roll ${head.roll.toFixed(1)} deg`, color: head.label === "upright" ? HEAD_COLOR : CLOSED_COLOR },
   ].filter(Boolean);
@@ -265,7 +306,8 @@ async function calibrateEar(faceLandmarker, durationSec, closedOffset) {
   const start = performance.now();
   while (performance.now() - start < durationSec * 1000) {
     updateMirror();
-    const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
+    removeGlare(mirrorCanvas, glareCleanCtx);
+    const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
     ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
@@ -314,6 +356,8 @@ async function main() {
   displayCanvas.height = video.videoHeight;
   mirrorCanvas.width = video.videoWidth;
   mirrorCanvas.height = video.videoHeight;
+  glareCleanCanvas.width = video.videoWidth;
+  glareCleanCanvas.height = video.videoHeight;
 
   statusEl.textContent = "";
   earCfg = CONFIG.ear;
@@ -338,6 +382,8 @@ async function main() {
   muteBtn.style.display = "inline-block";
 
   const eyeSmoother = new RollingMedian(5);
+  const leftEyeSmoother = new RollingMedian(5);
+  const rightEyeSmoother = new RollingMedian(5);
   const mouthSmoother = new RollingMedian(5);
   const headSmoother = new RollingMedian(5);
 
@@ -373,7 +419,8 @@ async function main() {
         return;
       }
       updateMirror();
-      const result = faceLandmarker.detectForVideo(mirrorCanvas, performance.now());
+      removeGlare(mirrorCanvas, glareCleanCtx);
+      const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
       const faceFound = result.faceLandmarks.length > 0;
 
       if (!faceFound) {
@@ -406,8 +453,8 @@ async function main() {
         if (leftBox && rightBox && mouthBox) {
           // run all three CNN calls concurrently instead of awaiting each GPU round-trip in turn
           [leftResult, rightResult, mouthResult] = await Promise.all([
-            drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm),
-            drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm),
+            drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother),
+            drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother),
             drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm),
           ]);
           // average both eyes so one drooping eyelid still raises the score
@@ -549,6 +596,10 @@ async function handleImageUpload(file, alreadyMirrored = false) {
     mirrorCtx.restore();
   }
   ctx.drawImage(mirrorCanvas, 0, 0);
+  // no glare removal for a single uploaded photo (matches predict.py's scope) -- just keep this canvas valid for drawEye/drawMouth's crop source
+  glareCleanCanvas.width = mirrorCanvas.width;
+  glareCleanCanvas.height = mirrorCanvas.height;
+  glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
 
   statusEl.textContent = "";
   let result = uploadFaceLandmarker.detect(mirrorCanvas);
@@ -559,6 +610,8 @@ async function handleImageUpload(file, alreadyMirrored = false) {
     if (retried) {
       result = retried;
       ctx.drawImage(mirrorCanvas, 0, 0);
+      glareCleanCtx.clearRect(0, 0, glareCleanCanvas.width, glareCleanCanvas.height);
+      glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
     }
   }
 

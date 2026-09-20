@@ -3,6 +3,7 @@ import time
 
 import cv2
 import mediapipe as mp
+import numpy as np
 
 from frames.config import load_config
 from frames.inference.alertness import AlertnessMonitor, RollingMedian
@@ -35,6 +36,17 @@ _BANNER_TEXT = {
 }
 
 
+def _remove_glare(image: np.ndarray) -> np.ndarray:
+    """Inpaints out bright, washed-out specular highlights (e.g. reflections off a clear visor) before tracking landmarks."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    brightness, saturation = hsv[:, :, 2], hsv[:, :, 1]
+    mask = ((brightness > 235) & (saturation < 60)).astype(np.uint8) * 255
+    if not mask.any():
+        return image
+    mask = cv2.dilate(mask, np.ones((3, 3), np.uint8))
+    return cv2.inpaint(image, mask, 3, cv2.INPAINT_TELEA)
+
+
 def _linear_score(value: float, low_at_zero: float, high_at_one: float) -> float:
     """Maps `value` to [0, 1], 0 at low_at_zero and 1 at high_at_one."""
     span = high_at_one - low_at_zero
@@ -64,7 +76,7 @@ def _calibrate_ear(cap, tracker, duration_sec: float, closed_offset: float) -> d
         if not ok:
             break
         frame = cv2.flip(frame, 1)
-        regions = tracker.extract(frame)
+        regions = tracker.extract(_remove_glare(frame))
         if regions is not None:
             samples.extend(eye.ear for eye in regions.eyes.values())
 
@@ -218,7 +230,7 @@ def main():
                     break
 
                 frame = cv2.flip(frame, 1)
-                regions = tracker.extract(frame)
+                regions = tracker.extract(_remove_glare(frame))
 
                 if regions is None:
                     if no_face_since is None:
