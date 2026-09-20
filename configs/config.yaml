@@ -95,7 +95,7 @@ calibration:
   # the population-average defaults below.
   duration_sec: 4.0
   closed_offset: 0.10
-  drooped_offset: 12.0
+  drooped_offset: 8.0
   roll_drooped_offset: 30.0
 
 mar:

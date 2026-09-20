@@ -258,7 +258,7 @@ def main():
         nonlocal ear_cfg, head_pose_cfg
         calibrated = _calibrate(
             cap, tracker, calibration_cfg["duration_sec"], calibration_cfg["closed_offset"],
-            calibration_cfg.get("drooped_offset", 12.0), calibration_cfg.get("roll_drooped_offset", 30.0),
+            calibration_cfg.get("drooped_offset", 8.0), calibration_cfg.get("roll_drooped_offset", 30.0),
         )
         if calibrated is not None:
             ear_cfg = calibrated["ear"]

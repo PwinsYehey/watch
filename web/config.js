@@ -6,7 +6,7 @@ const CONFIG = {
 
   alertness: { closedDurationThresholdSec: 1.5, perclosWindowSec: 5.0, perclosThreshold: 0.75, closednessThreshold: 0.85 },
   ear: { openThreshold: 0.35, closedThreshold: 0.10 },
-  calibration: { durationSec: 4.0, closedOffset: 0.10, droopedOffset: 12.0, rollDroopedOffset: 30.0 },
+  calibration: { durationSec: 4.0, closedOffset: 0.10, droopedOffset: 8.0, rollDroopedOffset: 30.0 },
   mar: { closedThreshold: 0.3, openThreshold: 0.6 },
   yawn: { closedDurationThresholdSec: 3.0, perclosWindowSec: 8.0, perclosThreshold: 0.8, closednessThreshold: 0.5, dipGracePeriodSec: 0.5 },
   headPose: { uprightThreshold: 8, droopedThreshold: 20, rollUprightThreshold: 15, rollDroopedThreshold: 45 },
