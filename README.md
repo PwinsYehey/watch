@@ -1,6 +1,4 @@
-# FRAMES
-
-Facial Recognition & Alertness Monitoring Engine System — real-time pilot/driver alertness monitoring via eye closure, yawning, and head-droop.
+# WATCH
 
 ## Setup
 
