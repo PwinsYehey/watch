@@ -135,9 +135,13 @@ def head_pose(landmarks, w: int, h: int) -> tuple[float, float] | None:
     return pitch, abs(float(angles[2]))
 
 
+def mean_brightness(image: np.ndarray) -> float:
+    return float(cv2.cvtColor(cv2.resize(image, (64, 48)), cv2.COLOR_BGR2GRAY).mean()) / 255.0
+
+
 def brighten(image: np.ndarray, dark_below: float, target: float) -> np.ndarray:
     """Gamma-lifts frames darker than dark_below to a mean brightness of target."""
-    mean = float(cv2.cvtColor(cv2.resize(image, (64, 48)), cv2.COLOR_BGR2GRAY).mean()) / 255.0
+    mean = mean_brightness(image)
     if mean >= dark_below or mean <= 0.0:
         return image
     gamma = np.log(target) / np.log(mean)

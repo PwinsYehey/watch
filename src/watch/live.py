@@ -2,20 +2,35 @@ import statistics
 import sys
 import threading
 import time
+from collections import deque
 
 import cv2
 import numpy as np
 
 from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian
 from watch.config import load_config
-from watch.face import FACE_MESH, FaceTracker
+from watch.face import FACE_MESH, FaceTracker, mean_brightness
 from watch.model import Classifier
 
 WINDOW = "WATCH - Live Alertness Monitoring (press q to quit)"
 GREEN, RED, AMBER, MAGENTA, ORANGE = (0, 200, 0), (0, 0, 220), (255, 200, 0), (255, 0, 200), (0, 165, 255)
-YELLOW, GRAY = (0, 215, 255), (120, 120, 120)
+YELLOW, GRAY, WHITE, DIM = (0, 215, 255), (120, 120, 120), (255, 255, 255), (150, 150, 150)
 BANNERS = {0: ("NORMAL", GREEN), 1: ("WARNING", YELLOW), 2: ("CRITICAL", RED), "no_face": ("NO FACE DETECTED", GRAY)}
 EYE_CONTOURS = {"left": FACE_MESH.FACEMESH_RIGHT_EYE, "right": FACE_MESH.FACEMESH_LEFT_EYE}
+PANEL_WIDTH = 300
+
+
+def _text(image, text, x, y, color=WHITE, scale=0.45, thickness=1):
+    cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def _level_box(panel, name, color, reason="", timer=""):
+    ink = (0, 0, 0) if color == YELLOW else WHITE
+    _text(panel, "ALERT LEVEL", 14, 24, DIM, 0.4)
+    cv2.rectangle(panel, (10, 32), (PANEL_WIDTH - 10, 118), color, -1)
+    _text(panel, name, 20, 64, ink, 0.8, 2)
+    _text(panel, reason, 20, 88, ink)
+    _text(panel, timer, 20, 108, ink, 0.4)
 
 
 def _glare_mask(image: np.ndarray) -> np.ndarray:
@@ -75,6 +90,7 @@ class LiveMonitor:
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
         self.tracker = FaceTracker()
         self.alarm = Alarm()
+        self.events = deque(maxlen=5)
         self._reset()
 
     def _reset(self):
@@ -82,6 +98,7 @@ class LiveMonitor:
         self.smoothers = {key: RollingMedian(window) for key in ("left", "right", "eyes", "mouth", "head")}
         self.monitors = {key: AlertnessMonitor(**self.config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"))}
         self.escalation = EscalationMonitor(**self.config["escalation"])
+        self._level = 0
 
     def _read(self):
         ok, frame = self.capture.read()
@@ -104,7 +121,9 @@ class LiveMonitor:
                     rolls.append(regions.roll)
             for y, text in ((40, "Calibrating, look at the camera normally"), (80, f"{remaining:.1f}s")):
                 cv2.putText(frame, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ORANGE, 2)
-            cv2.imshow(WINDOW, frame)
+            panel = np.full((frame.shape[0], PANEL_WIDTH, 3), 24, np.uint8)
+            _level_box(panel, "CALIBRATING", ORANGE, "look at the camera normally", f"{remaining:.1f}s left")
+            cv2.imshow(WINDOW, np.hstack([frame, panel]))
             cv2.waitKey(1)
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
@@ -151,7 +170,7 @@ class LiveMonitor:
         label = "nodding" if droop >= self.config["nod"]["closedness_threshold"] else "upright"
         return {"score": droop, "label": label, "pitch": pitch, "roll": roll}
 
-    def _draw(self, frame, regions, cues, escalation, statuses, fps):
+    def _draw(self, frame, regions, cues, escalation, statuses, fps, brightness):
         h, w = frame.shape[:2]
 
         def point(i):
@@ -167,16 +186,11 @@ class LiveMonitor:
                 cv2.line(frame, (x, y), (x + dx * length, y), color, thickness, cv2.LINE_AA)
                 cv2.line(frame, (x, y), (x, y + dy * length), color, thickness, cv2.LINE_AA)
 
-        lines = []
         for side in ("left", "right"):
             if cue := cues.get(side):
-                color = GREEN if cue["label"] == "open" else RED
-                brackets(EYE_CONTOURS[side], 0.25, color)
-                lines.append((f"{side} eye: {cue['label']} {cue['score']:.0%} | EAR {cue['ratio']:.2f}", color))
+                brackets(EYE_CONTOURS[side], 0.25, GREEN if cue["label"] == "open" else RED)
         if cue := cues.get("mouth"):
-            color = RED if cue["label"] == "yawn" else AMBER
-            brackets(FACE_MESH.FACEMESH_LIPS, 0.2, color)
-            lines.append((f"mouth: {cue['label']} {cue['score']:.0%} | MAR {cue['ratio']:.2f}", color))
+            brackets(FACE_MESH.FACEMESH_LIPS, 0.2, RED if cue["label"] == "yawn" else AMBER)
         if cue := cues.get("head"):
             color = MAGENTA if cue["label"] == "upright" else RED
             brackets(FACE_MESH.FACEMESH_FACE_OVAL, 0.05, color, 3)
@@ -184,25 +198,57 @@ class LiveMonitor:
             cv2.line(frame, point(10), point(152), color, 2, cv2.LINE_AA)
             for i in (10, 152):
                 cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
-            lines.append((f"head: {cue['label']} | pitch {cue['pitch']:.1f} | roll {cue['roll']:.1f} deg", color))
 
-        if lines:
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (10, 88), (280, 98 + len(lines) * 22), (0, 0, 0), -1)
-            cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-            for i, (text, color) in enumerate(lines):
-                cv2.putText(frame, text, (18, 88 + 22 * (i + 1)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+        return np.hstack([frame, self._dashboard(h, regions, cues, escalation, statuses, fps, brightness)])
 
-        text, color = BANNERS["no_face" if regions is None and escalation.level == 0 else escalation.level]
-        if escalation.reason:
-            text += f": {escalation.reason}"
-        cv2.rectangle(frame, (0, 0), (w, 50), color, -1)
-        cv2.putText(frame, text, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0) if color == YELLOW else (255, 255, 255), 2)
-        detail = " | ".join(f"{label} {statuses[key].closed_duration:.1f}s" for key, label in (("eyes", "eyes closed"), ("mouth", "mouth open"), ("head", "head drooped")))
-        if escalation.level == 1:
-            detail += f" | watching {escalation.window_left:.0f}s"
-        cv2.putText(frame, detail, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"FPS: {fps:.1f}", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    def _dashboard(self, height, regions, cues, escalation, statuses, fps, brightness):
+        panel = np.full((height, PANEL_WIDTH, 3), 24, np.uint8)
+        name, color = BANNERS["no_face" if regions is None and escalation.level == 0 else escalation.level]
+        timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
+        _level_box(panel, name, color, escalation.reason, timer)
+
+        _text(panel, "SIGNS", 14, 144, DIM, 0.4)
+        eyes = [cues[side] for side in ("left", "right") if cues.get(side)]
+        mouth, head = cues.get("mouth"), cues.get("head")
+        signs = (
+            ("Eyes", "eyes", eyes and ("closed" if np.mean([cue["score"] for cue in eyes]) >= 0.5 else "open"), "closed"),
+            ("Yawn", "mouth", mouth and ("yawning" if mouth["label"] == "yawn" else "normal"), "yawning"),
+            ("Head", "head", head and ("drooped" if head["label"] == "nodding" else "upright"), "drooped"),
+        )
+        for i, (label, key, state, concerning) in enumerate(signs):
+            y = 166 + 22 * i
+            if not state:
+                dot, state = GRAY, "not visible"
+            else:
+                dot = RED if statuses[key].state == "not_alert" else YELLOW if state == concerning else GREEN
+            cv2.circle(panel, (19, y - 5), 6, dot, -1, cv2.LINE_AA)
+            _text(panel, label, 34, y)
+            _text(panel, state, 104, y, DIM if dot == GRAY else dot)
+            _text(panel, f"{statuses[key].closed_duration:.1f}s", PANEL_WIDTH - 60, y, DIM)
+
+        _text(panel, "DETECTION", 14, 238, DIM, 0.4)
+        face, dark = regions is not None, brightness < self.settings["low_light_mean"]
+        checks = (
+            ("Face", "found" if face else "not found", GREEN if face else RED),
+            ("Eyes", f"{len(eyes)} of 2 readable" if face else "-", (RED, YELLOW, GREEN)[len(eyes)] if face else GRAY),
+            ("Mouth", ("readable" if mouth else "not readable") if face else "-", (GREEN if mouth else YELLOW) if face else GRAY),
+            ("Lighting", "low, boosted" if dark else "good", YELLOW if dark else GREEN),
+            ("FPS", f"{fps:.0f}", GREEN if fps >= 15 else YELLOW),
+        )
+        for i, (label, value, value_color) in enumerate(checks):
+            y = 260 + 22 * i
+            _text(panel, label, 14, y)
+            _text(panel, value, 104, y, value_color)
+
+        _text(panel, "RECENT EVENTS", 14, 376, DIM, 0.4)
+        if not self.events:
+            _text(panel, "none yet", 14, 396, DIM, 0.4)
+        for i, (stamp, level, reason) in enumerate(reversed(self.events)):
+            if (y := 396 + 18 * i) > height - 6:
+                break
+            name, color = BANNERS[level]
+            _text(panel, f"{stamp} {name} {reason}"[:40], 14, y, color, 0.4)
+        return panel
 
     def run(self):
         self.calibrate()
@@ -237,10 +283,13 @@ class LiveMonitor:
                 statuses = {key: self.monitors[key].update(self.smoothers[key].add(score), now) for key, score in scores.items()}
                 escalation = self.escalation.update(statuses, regions is not None, now)
                 self.alarm.set(escalation.level == 2)
+                if escalation.level != self._level:
+                    self._level = escalation.level
+                    self.events.append((time.strftime("%H:%M:%S"), escalation.level, escalation.reason))
 
-                self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6))
+                view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame))
                 previous = now
-                cv2.imshow(WINDOW, frame)
+                cv2.imshow(WINDOW, view)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
