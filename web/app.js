@@ -13,6 +13,8 @@ const originalPanel = document.getElementById("originalPanel");
 const scannedLabel = document.getElementById("scannedLabel");
 const captureHint = document.getElementById("captureHint");
 const flashOverlay = document.getElementById("flashOverlay");
+const placeholder = document.getElementById("placeholder");
+const dashboard = document.getElementById("dashboard");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -455,7 +457,6 @@ function levelBanner(escalation, faceFound) {
   return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
 }
 
-const dashboard = document.getElementById("dashboard");
 const dashLevel = document.getElementById("dashLevel");
 const DOT = { green: "#00c800", yellow: "#ffd700", red: "#dc0000", gray: "#787878" };
 let dashEvents = [];
@@ -502,6 +503,24 @@ function showCalibration(calibrated) {
     .join("");
 }
 
+// The phone layout shows one of Detection, Calibration or Events at a time.
+for (const tab of document.querySelectorAll(".dash-tabs button")) {
+  tab.addEventListener("click", () => {
+    document.getElementById("dashboard").dataset.tab = tab.dataset.tab;
+    for (const other of document.querySelectorAll(".dash-tabs button")) other.setAttribute("aria-selected", String(other === tab));
+  });
+}
+
+// Shows the dashboard only while monitoring, animating the layout change where the browser supports it.
+function setDashboardVisible(visible) {
+  if (dashboard.hidden === !visible) return;
+  const apply = () => {
+    dashboard.hidden = !visible;
+  };
+  if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(apply);
+  else apply();
+}
+
 function resetDashboard() {
   dashEvents = [];
   dashLastLevel = 0;
@@ -516,7 +535,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
   if (escalation.level !== dashLastLevel) {
     dashLastLevel = escalation.level;
     dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
-    dashEvents = dashEvents.slice(0, 5);
+    dashEvents = dashEvents.slice(0, 50);
   }
   if (performance.now() - dashLastDraw < 150) return;
   dashLastDraw = performance.now();
@@ -636,7 +655,9 @@ async function main() {
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
   resetDashboard();
-  dashboard.hidden = false;
+  setDashLevel("STARTING", "#2a2f3a", "Getting the camera ready", "", false);
+  setDashboardVisible(true);
+  placeholder.hidden = true;
   playStartSound();
   displayCanvas.classList.add("capturable");
   captureHint.hidden = false;
@@ -674,12 +695,15 @@ async function main() {
       earCfg = calibrated.ear;
       if (calibrated.headPose) headPoseCfg = calibrated.headPose;
     }
+    // The camera may have been stopped, or a photo captured, while calibrating.
+    if (!cameraActive) return;
     showCalibration(Boolean(calibrated));
     paused = false;
   }
 
   await runCalibration();
-  muteBtn.style.display = "inline-block";
+  if (!cameraActive) return;
+  muteBtn.hidden = false;
 
   const eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
   const leftEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
@@ -764,6 +788,8 @@ async function main() {
           headDroop = headResult?.droop ?? null;
         }
       }
+      // A frame still in flight when the camera stops must not overwrite the idle dashboard or start the alarm.
+      if (!cameraActive) return;
       const now = performance.now() / 1000;
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
@@ -876,6 +902,9 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   originalCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
   originalPanel.hidden = false;
   scannedLabel.hidden = false;
+  placeholder.hidden = true;
+  // A photo is not monitored over time, so the dashboard has nothing to show.
+  setDashboardVisible(false);
 
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);
@@ -1017,10 +1046,12 @@ function stopCamera() {
   captureHint.hidden = true;
   stopAlarm();
   playStopSound();
-  muteBtn.style.display = "none";
+  muteBtn.hidden = true;
   cameraIcon.style.display = "";
   liveDot.hidden = true;
-  dashboard.hidden = true;
+  resetDashboard();
+  setDashboardVisible(false);
+  placeholder.hidden = false;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
   uploadBtn.classList.remove("disabled");
