@@ -28,8 +28,8 @@ const CONFIG = {
   "nod": {
     "closedDurationThresholdSec": 2.0,
     "perclosWindowSec": 6.0,
-    "perclosThreshold": 0.6,
-    "closednessThreshold": 0.5,
+    "perclosThreshold": 0.9,
+    "closednessThreshold": 1.0,
     "dipGracePeriodSec": 0.0
   },
   "ear": {
@@ -42,15 +42,15 @@ const CONFIG = {
   },
   "headPose": {
     "uprightThreshold": 8,
-    "droopedThreshold": 20,
-    "rollUprightThreshold": 15,
+    "droopedThreshold": 33,
+    "rollUprightThreshold": 5,
     "rollDroopedThreshold": 45
   },
   "calibration": {
     "durationSec": 4.0,
     "closedOffset": 0.1,
-    "droopedOffset": 8.0,
-    "rollDroopedOffset": 30.0
+    "droopedOffset": 25.0,
+    "rollDroopedOffset": 40.0
   },
   "live": {
     "minCnnConfidence": 0.65,

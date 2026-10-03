@@ -78,11 +78,12 @@ yawn:
   closedness_threshold: 0.5
   dip_grace_period_sec: 0.5
 
+# Head counts as drooped only once it reaches the full drooped angle below.
 nod:
   closed_duration_threshold_sec: 2.0
   perclos_window_sec: 6.0
-  perclos_threshold: 0.6
-  closedness_threshold: 0.5
+  perclos_threshold: 0.9
+  closedness_threshold: 1.0
   dip_grace_period_sec: 0.0
 
 # Defaults used until per-user calibration replaces them.
@@ -96,15 +97,16 @@ mar:
 
 head_pose:
   upright_threshold: 8
-  drooped_threshold: 20
-  roll_upright_threshold: 15
+  drooped_threshold: 33
+  roll_upright_threshold: 5
   roll_drooped_threshold: 45
 
+# Drooped offsets are degrees past the user's resting pose: clearly looking down, or head near the shoulder.
 calibration:
   duration_sec: 4.0
   closed_offset: 0.10
-  drooped_offset: 8.0
-  roll_drooped_offset: 30.0
+  drooped_offset: 25.0
+  roll_drooped_offset: 40.0
 
 live:
   min_cnn_confidence: 0.65

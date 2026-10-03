@@ -146,7 +146,8 @@ class LiveMonitor:
             linear_score(pitch, head["upright_threshold"], head["drooped_threshold"]),
             linear_score(roll, head["roll_upright_threshold"], head["roll_drooped_threshold"]),
         )
-        return {"score": droop, "label": "nodding" if droop >= 0.5 else "upright", "pitch": pitch, "roll": roll}
+        label = "nodding" if droop >= self.config["nod"]["closedness_threshold"] else "upright"
+        return {"score": droop, "label": label, "pitch": pitch, "roll": roll}
 
     def _draw(self, frame, regions, cues, state, statuses, fps):
         h, w = frame.shape[:2]

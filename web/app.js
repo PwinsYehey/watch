@@ -297,7 +297,7 @@ function headPoseStatus(pitch, roll, landmarks) {
   const pitchDroop = linearScore(pitch, headPoseCfg.uprightThreshold, headPoseCfg.droopedThreshold);
   const rollDroop = linearScore(roll, headPoseCfg.rollUprightThreshold, headPoseCfg.rollDroopedThreshold);
   const droop = Math.max(pitchDroop, rollDroop);
-  const label = droop >= 0.5 ? "nodding" : "upright";
+  const label = droop >= CONFIG.nod.closednessThreshold ? "nodding" : "upright";
   drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
   return { droop, label, pitch, roll };
 }
