@@ -110,6 +110,7 @@ class LiveMonitor:
     def calibrate(self):
         """Measures this user's resting EAR and head pose so thresholds fit them rather than an average face."""
         settings = self.config["calibration"]
+        self.alarm.set(False)
         ears, pitches, rolls = [], [], []
         start = time.time()
         while (remaining := settings["duration_sec"] - (time.time() - start)) > 0:
@@ -260,10 +261,11 @@ class LiveMonitor:
                 if regions is None:
                     no_face_since = no_face_since or time.time()
                 elif no_face_since is not None:
-                    # A face returning after a real gap is likely a new driver, unless a warning is being held.
+                    # The user left the camera, so calibrate again for whoever is in front of it now.
                     gap, no_face_since = time.time() - no_face_since, None
-                    if gap >= self.settings["recalibrate_gap_sec"] and self.escalation.level == 0:
+                    if gap >= self.settings["recalibrate_gap_sec"]:
                         self.calibrate()
+                        self.events.append((time.strftime("%H:%M:%S"), 0, "recalibrated"))
                         continue
 
                 cues = {}

@@ -705,33 +705,40 @@ async function main() {
   if (!cameraActive) return;
   muteBtn.hidden = false;
 
-  const eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
-  const leftEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
-  const rightEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
-  const mouthSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
-  const headSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  let eyeSmoother, leftEyeSmoother, rightEyeSmoother, mouthSmoother, headSmoother;
+  let eyeMonitor, yawnMonitor, nodMonitor, escalationMonitor;
 
-  const eyeMonitor = new AlertnessMonitor({
-    closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
-    perclosWindow: CONFIG.alertness.perclosWindowSec,
-    perclosThreshold: CONFIG.alertness.perclosThreshold,
-    closednessThreshold: CONFIG.alertness.closednessThreshold,
-  });
-  const yawnMonitor = new AlertnessMonitor({
-    closedDurationThreshold: CONFIG.yawn.closedDurationThresholdSec,
-    perclosWindow: CONFIG.yawn.perclosWindowSec,
-    perclosThreshold: CONFIG.yawn.perclosThreshold,
-    closednessThreshold: CONFIG.yawn.closednessThreshold,
-    dipGracePeriod: CONFIG.yawn.dipGracePeriodSec,
-  });
-  const escalationMonitor = new EscalationMonitor(CONFIG.escalation);
-  const nodMonitor = new AlertnessMonitor({
-    closedDurationThreshold: CONFIG.nod.closedDurationThresholdSec,
-    perclosWindow: CONFIG.nod.perclosWindowSec,
-    perclosThreshold: CONFIG.nod.perclosThreshold,
-    closednessThreshold: CONFIG.nod.closednessThreshold,
-    dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
-  });
+  // Mirrors LiveMonitor._reset in src/watch/live.py: a fresh start after every calibration.
+  function resetMonitors() {
+    eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+    leftEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+    rightEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+    mouthSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+    headSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+
+    eyeMonitor = new AlertnessMonitor({
+      closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
+      perclosWindow: CONFIG.alertness.perclosWindowSec,
+      perclosThreshold: CONFIG.alertness.perclosThreshold,
+      closednessThreshold: CONFIG.alertness.closednessThreshold,
+    });
+    yawnMonitor = new AlertnessMonitor({
+      closedDurationThreshold: CONFIG.yawn.closedDurationThresholdSec,
+      perclosWindow: CONFIG.yawn.perclosWindowSec,
+      perclosThreshold: CONFIG.yawn.perclosThreshold,
+      closednessThreshold: CONFIG.yawn.closednessThreshold,
+      dipGracePeriod: CONFIG.yawn.dipGracePeriodSec,
+    });
+    escalationMonitor = new EscalationMonitor(CONFIG.escalation);
+    nodMonitor = new AlertnessMonitor({
+      closedDurationThreshold: CONFIG.nod.closedDurationThresholdSec,
+      perclosWindow: CONFIG.nod.perclosWindowSec,
+      perclosThreshold: CONFIG.nod.perclosThreshold,
+      closednessThreshold: CONFIG.nod.closednessThreshold,
+      dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
+    });
+  }
+  resetMonitors();
 
   let prevTime = performance.now();
 
@@ -757,11 +764,14 @@ async function main() {
       if (!faceFound) {
         if (noFaceSince === null) noFaceSince = performance.now();
       } else if (noFaceSince !== null) {
-        // A face returning after a real gap is likely a new driver, unless a warning is being held.
+        // The user left the camera, so calibrate again for whoever is in front of it now.
         const gap = performance.now() - noFaceSince;
         noFaceSince = null;
-        if (gap >= CONFIG.live.recalibrateGapSec * 1000 && escalationMonitor.level === 0) {
+        if (gap >= CONFIG.live.recalibrateGapSec * 1000) {
           await runCalibration();
+          resetMonitors();
+          dashLastLevel = 0;
+          dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: 0, reason: "recalibrated" });
           requestAnimationFrame(frame);
           return;
         }
