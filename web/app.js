@@ -59,8 +59,9 @@ function removeGlare(sourceCanvas, targetCtx) {
     }
   }
 
-  liftLowLight(data);
+  const brightness = liftLowLight(data);
   targetCtx.putImageData(sharp, 0, 0);
+  return brightness;
 }
 
 // Mirrors brighten in src/watch/face.py.
@@ -71,7 +72,7 @@ function liftLowLight(data) {
     count++;
   }
   const mean = sum / count / 255, target = CONFIG.live.lowLightTarget;
-  if (mean >= CONFIG.live.lowLightMean || mean <= 0) return;
+  if (mean >= CONFIG.live.lowLightMean || mean <= 0) return mean;
   const gamma = Math.log(target) / Math.log(mean);
   const lut = new Uint8ClampedArray(256);
   for (let v = 0; v < 256; v++) lut[v] = Math.pow(v / 255, gamma) * 255;
@@ -80,6 +81,7 @@ function liftLowLight(data) {
     data[i + 1] = lut[data[i + 1]];
     data[i + 2] = lut[data[i + 2]];
   }
+  return mean;
 }
 
 function liftLowLightCanvas(targetCtx) {
@@ -401,18 +403,78 @@ function eyeClosednessOf(readings) {
   return total ? eyes.reduce((s, r) => s + r.closedness * r.width, 0) / total : null;
 }
 
-function drawBanner(escalation, faceFound, eyeStatus, yawnStatus, nodStatus) {
-  const banner = LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
-  ctx.fillStyle = banner.color;
-  ctx.fillRect(0, 0, canvas.width, 50);
-  ctx.fillStyle = escalation.level === 1 ? "#000000" : "#ffffff";
-  ctx.font = "bold 18px sans-serif";
-  ctx.fillText(escalation.reason ? `${banner.text}: ${escalation.reason}` : banner.text, 20, 34);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "10px sans-serif";
-  let detail = `eyes closed ${eyeStatus.closedDuration.toFixed(1)}s | mouth open ${yawnStatus.closedDuration.toFixed(1)}s | head drooped ${nodStatus.closedDuration.toFixed(1)}s`;
-  if (escalation.level === 1) detail += ` | watching ${escalation.windowLeft.toFixed(0)}s`;
-  ctx.fillText(detail, 20, 70);
+function levelBanner(escalation, faceFound) {
+  return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
+}
+
+const dashboard = document.getElementById("dashboard");
+const dashLevel = document.getElementById("dashLevel");
+const DOT = { green: "#00c800", yellow: "#ffd700", red: "#dc0000", gray: "#787878" };
+let dashEvents = [];
+let dashLastLevel = 0;
+let dashLastDraw = -Infinity;
+
+function setDashLevel(name, color, reason, timer, darkText) {
+  dashLevel.style.background = color;
+  dashLevel.style.color = darkText ? "#000" : "#fff";
+  document.getElementById("dashLevelName").textContent = name;
+  document.getElementById("dashLevelReason").textContent = reason;
+  document.getElementById("dashLevelTimer").textContent = timer;
+}
+
+function dashRow(color, label, value, extra = "") {
+  return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${color === DOT.gray ? "#888" : color}">${value}</span><span class="dim">${extra}</span>`;
+}
+
+function resetDashboard() {
+  dashEvents = [];
+  dashLastLevel = 0;
+  document.getElementById("dashSigns").innerHTML = "";
+  document.getElementById("dashChecks").innerHTML = "";
+  document.getElementById("dashEvents").innerHTML = '<li class="dim">none yet</li>';
+}
+
+// Mirrors LiveMonitor._dashboard in src/watch/live.py.
+function updateDashboard({ escalation, faceFound, left, right, mouth, head, statuses, fps, brightness }) {
+  if (escalation.level !== dashLastLevel) {
+    dashLastLevel = escalation.level;
+    dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
+    dashEvents = dashEvents.slice(0, 5);
+  }
+  if (performance.now() - dashLastDraw < 150) return;
+  dashLastDraw = performance.now();
+
+  const banner = levelBanner(escalation, faceFound);
+  const timer = { 1: `watching ${escalation.windowLeft.toFixed(0)}s`, 2: "alarm on" }[escalation.level] || "";
+  setDashLevel(banner.text, banner.color, escalation.reason, timer, escalation.level === 1);
+
+  const eyes = [left, right].filter(Boolean);
+  const eyesClosed = eyes.length && eyes.reduce((s, r) => s + r.closedness, 0) / eyes.length >= 0.5;
+  const signs = [
+    ["Eyes", statuses.eyes, eyes.length ? (eyesClosed ? "closed" : "open") : null, "closed"],
+    ["Yawn", statuses.mouth, mouth ? (mouth.label === "yawn" ? "yawning" : "normal") : null, "yawning"],
+    ["Head", statuses.head, head ? (head.label === "nodding" ? "drooped" : "upright") : null, "drooped"],
+  ];
+  document.getElementById("dashSigns").innerHTML = signs
+    .map(([label, status, state, concerning]) => {
+      const color = !state ? DOT.gray : status.state === "not_alert" ? DOT.red : state === concerning ? DOT.yellow : DOT.green;
+      return dashRow(color, label, state || "not visible", `${status.closedDuration.toFixed(1)}s`);
+    })
+    .join("");
+
+  const dark = brightness < CONFIG.live.lowLightMean;
+  const checks = [
+    ["Face", faceFound ? "found" : "not found", faceFound ? DOT.green : DOT.red],
+    ["Eyes", faceFound ? `${eyes.length} of 2 readable` : "-", faceFound ? [DOT.red, DOT.yellow, DOT.green][eyes.length] : DOT.gray],
+    ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
+    ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
+    ["FPS", fps.toFixed(0), fps >= 15 ? DOT.green : DOT.yellow],
+  ];
+  document.getElementById("dashChecks").innerHTML = checks.map(([label, value, color]) => dashRow(color, label, value)).join("");
+
+  document.getElementById("dashEvents").innerHTML = dashEvents.length
+    ? dashEvents.map((e) => `<li style="color:${LEVEL_BANNERS[e.level].color}">${e.time} ${LEVEL_BANNERS[e.level].text} ${e.reason}</li>`).join("")
+    : '<li class="dim">none yet</li>';
 }
 
 function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
@@ -495,6 +557,8 @@ async function main() {
   startBtnLabel.textContent = "Stop camera";
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
+  resetDashboard();
+  dashboard.hidden = false;
   playStartSound();
   displayCanvas.classList.add("capturable");
   captureHint.hidden = false;
@@ -521,6 +585,7 @@ async function main() {
   async function runCalibration() {
     paused = true;
     stopAlarm();
+    setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${CONFIG.calibration.durationSec}s`, false);
     const calibrated = await calibrate(
       faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
       CONFIG.calibration.droopedOffset, CONFIG.calibration.rollDroopedOffset,
@@ -579,7 +644,7 @@ async function main() {
         return;
       }
       updateMirror();
-      removeGlare(mirrorCanvas, glareCleanCtx);
+      const brightness = removeGlare(mirrorCanvas, glareCleanCtx);
       let result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
       // Retry faces the tracker misses, such as one far from the camera.
       if (!result.faceLandmarks.length) result = (await detectZoomed(zoomLandmarker, glareCleanCanvas)) || result;
@@ -620,8 +685,6 @@ async function main() {
           headDroop = headResult?.droop ?? null;
         }
       }
-      drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
-
       const now = performance.now() / 1000;
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
@@ -631,13 +694,12 @@ async function main() {
       if (escalation.level === 2) startAlarm();
       else stopAlarm();
 
-      drawBanner(escalation, faceFound, eyeStatus, yawnStatus, nodStatus);
-
       const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
       prevTime = now;
-      ctx.fillStyle = "#00ffff";
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillText(`FPS: ${fps.toFixed(1)}`, 20, canvas.height - 20);
+      updateDashboard({
+        escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult,
+        statuses: { eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, fps, brightness,
+      });
 
       if (!cameraActive) return;
       displayCtx.drawImage(canvas, 0, 0);
@@ -881,6 +943,7 @@ function stopCamera() {
   muteBtn.style.display = "none";
   cameraIcon.style.display = "";
   liveDot.hidden = true;
+  dashboard.hidden = true;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
   uploadBtn.classList.remove("disabled");

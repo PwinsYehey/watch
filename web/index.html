@@ -30,11 +30,23 @@
     .paste-hint { margin-top: 10px; font-size: 13px; color: #999; }
     #imageUpload { display: none; }
     footer { margin-top: 4px; font-size: 12px; color: #555; }
+    .dashboard { width: 280px; box-sizing: border-box; text-align: left; background: #181818; border: 1px solid #333; padding: 12px 14px; font-size: 13px; }
+    .dash-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin: 16px 0 6px; }
+    .dash-label:first-child { margin-top: 0; }
+    .dash-level { padding: 10px 12px; border-radius: 4px; background: #00c800; color: #fff; }
+    .dash-level-name { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
+    .dash-level-timer { font-size: 12px; opacity: 0.85; min-height: 15px; }
+    .dash-rows { display: grid; grid-template-columns: 10px 64px 1fr auto; gap: 7px 8px; align-items: center; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dash-events { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+    .dash-events li { margin: 4px 0; }
+    .dim { color: #888; }
 
     @media (max-width: 480px) {
       body { padding: 12px; }
       .actions-row { gap: 10px; flex-wrap: wrap; }
       #startBtn, .upload-btn { padding: 10px 16px; font-size: 14px; }
+      .dashboard { width: 100%; }
     }
   </style>
 </head>
@@ -55,6 +67,20 @@
       </div>
       <p class="capture-hint" id="captureHint" hidden>Click the video to capture a photo for detailed analysis.</p>
     </div>
+    <aside class="dashboard" id="dashboard" hidden>
+      <div class="dash-label">Alert level</div>
+      <div class="dash-level" id="dashLevel">
+        <div class="dash-level-name" id="dashLevelName">NORMAL</div>
+        <div id="dashLevelReason"></div>
+        <div class="dash-level-timer" id="dashLevelTimer"></div>
+      </div>
+      <div class="dash-label">Signs</div>
+      <div class="dash-rows" id="dashSigns"></div>
+      <div class="dash-label">Detection</div>
+      <div class="dash-rows" id="dashChecks"></div>
+      <div class="dash-label">Recent events</div>
+      <ol class="dash-events" id="dashEvents"></ol>
+    </aside>
   </div>
   <div class="actions-row">
     <button id="startBtn">
@@ -78,7 +104,7 @@
   <script src="config.js?v=19"></script>
   <script src="geometry.js?v=16"></script>
   <script src="alertness.js?v=11"></script>
-  <script type="module" src="app.js?v=47"></script>
+  <script type="module" src="app.js?v=49"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>
