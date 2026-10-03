@@ -1,5 +1,5 @@
 // Browser port of src/watch/live.py using MediaPipe Tasks Vision and TensorFlow.js.
-import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 480;
@@ -235,7 +235,6 @@ async function predictClassState(model, sourceCanvas, crop, classNames, positive
   };
 }
 
-let drawingUtils = null;
 let earCfg = CONFIG.ear;
 let headPoseCfg = CONFIG.headPose;
 
@@ -272,7 +271,6 @@ function ensureModels() {
         minTrackingConfidence: CONFIG.live.faceTrackingConfidence,
       });
 
-      drawingUtils = new DrawingUtils(ctx);
       return { eyeModel, yawnModel, faceLandmarker, vision, baseOptions };
     })();
   }
@@ -302,6 +300,42 @@ function ensureBlazeface() {
   return blazefacePromise;
 }
 
+// Mirrors brackets in src/watch/live.py.
+function drawBrackets(landmarks, connections, margin, color, lineWidth = 2) {
+  const ids = new Set(connections.flatMap((c) => [c.start, c.end]));
+  const xs = [...ids].map((i) => landmarks[i].x * canvas.width);
+  const ys = [...ids].map((i) => landmarks[i].y * canvas.height);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const padX = (x1 - x0) * margin, padY = (y1 - y0) * margin;
+  x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+  const length = Math.max(6, Math.min(x1 - x0, y1 - y0) * 0.25);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+    ctx.moveTo(x + dx * length, y);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x, y + dy * length);
+  }
+  ctx.stroke();
+}
+
+// Forehead to chin, so sideways tilt is visible.
+function drawHeadAxis(landmarks, color) {
+  const [top, chin] = [10, 152].map((i) => ({ x: landmarks[i].x * canvas.width, y: landmarks[i].y * canvas.height }));
+  ctx.strokeStyle = ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(top.x, top.y);
+  ctx.lineTo(chin.x, chin.y);
+  ctx.stroke();
+  for (const p of [top, chin]) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
 async function drawEye(side, box, crop, ear, model, earCfg, landmarks, smoother) {
   const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, crop, CONFIG.eyeClassNames, "eyes_closed", true);
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
@@ -313,7 +347,7 @@ async function drawEye(side, box, crop, ear, model, earCfg, landmarks, smoother)
   const label = closedness >= 0.5 ? "eyes_closed" : "eyes_opened";
 
   const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE : FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
-  drawingUtils.drawConnectors(landmarks, connectors, { color: label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
+  drawBrackets(landmarks, connectors, 0.25, label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR);
   return { closedness, label, ear, cnnClosedness, width: screenWidth(landmarks, side === "left" ? LEFT_EYE_AXIS : RIGHT_EYE_AXIS, canvas.width, canvas.height) };
 }
 
@@ -325,7 +359,7 @@ async function drawMouth(crop, mar, model, landmarks) {
   const openness = Math.max(cnnOpenness, marOpenness);
   const label = openness >= 0.5 ? "yawn" : "no yawn";
 
-  drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LIPS, { color: label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR, lineWidth: 2 });
+  drawBrackets(landmarks, FaceLandmarker.FACE_LANDMARKS_LIPS, 0.2, label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR);
   return { openness, label, mar };
 }
 
@@ -335,7 +369,9 @@ function headPoseStatus(pitch, roll, landmarks) {
   const rollDroop = linearScore(roll, headPoseCfg.rollUprightThreshold, headPoseCfg.rollDroopedThreshold);
   const droop = Math.max(pitchDroop, rollDroop);
   const label = droop >= CONFIG.nod.closednessThreshold ? "nodding" : "upright";
-  drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
+  const color = label === "upright" ? HEAD_COLOR : CLOSED_COLOR;
+  drawBrackets(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, 0.05, color, 3);
+  drawHeadAxis(landmarks, color);
   return { droop, label, pitch, roll };
 }
 
@@ -525,7 +561,6 @@ async function main() {
     dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
   });
 
-  drawingUtils = new DrawingUtils(ctx);
   let prevTime = performance.now();
 
   async function frame() {

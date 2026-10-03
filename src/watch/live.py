@@ -152,24 +152,36 @@ class LiveMonitor:
     def _draw(self, frame, regions, cues, state, statuses, fps):
         h, w = frame.shape[:2]
 
-        def contour(connections, color):
-            for a, b in connections if regions else ():
-                pa, pb = regions.landmarks[a], regions.landmarks[b]
-                cv2.line(frame, (int(pa.x * w), int(pa.y * h)), (int(pb.x * w), int(pb.y * h)), color, 2)
+        def point(i):
+            return int(regions.landmarks[i].x * w), int(regions.landmarks[i].y * h)
+
+        def brackets(connections, margin, color, thickness=2):
+            points = np.array([point(i) for i in {i for pair in connections for i in pair}])
+            (x0, y0), (x1, y1) = points.min(axis=0), points.max(axis=0)
+            pad_x, pad_y = int((x1 - x0) * margin), int((y1 - y0) * margin)
+            x0, y0, x1, y1 = x0 - pad_x, y0 - pad_y, x1 + pad_x, y1 + pad_y
+            length = max(6, int(min(x1 - x0, y1 - y0) * 0.25))
+            for x, y, dx, dy in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x0, y1, 1, -1), (x1, y1, -1, -1)):
+                cv2.line(frame, (x, y), (x + dx * length, y), color, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x, y), (x, y + dy * length), color, thickness, cv2.LINE_AA)
 
         lines = []
         for side in ("left", "right"):
             if cue := cues.get(side):
                 color = GREEN if cue["label"] == "open" else RED
-                contour(EYE_CONTOURS[side], color)
+                brackets(EYE_CONTOURS[side], 0.25, color)
                 lines.append((f"{side} eye: {cue['label']} {cue['score']:.0%} | EAR {cue['ratio']:.2f}", color))
         if cue := cues.get("mouth"):
             color = RED if cue["label"] == "yawn" else AMBER
-            contour(FACE_MESH.FACEMESH_LIPS, color)
+            brackets(FACE_MESH.FACEMESH_LIPS, 0.2, color)
             lines.append((f"mouth: {cue['label']} {cue['score']:.0%} | MAR {cue['ratio']:.2f}", color))
         if cue := cues.get("head"):
             color = MAGENTA if cue["label"] == "upright" else RED
-            contour(FACE_MESH.FACEMESH_FACE_OVAL, color)
+            brackets(FACE_MESH.FACEMESH_FACE_OVAL, 0.05, color, 3)
+            # Forehead to chin, so sideways tilt is visible.
+            cv2.line(frame, point(10), point(152), color, 2, cv2.LINE_AA)
+            for i in (10, 152):
+                cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
             lines.append((f"head: {cue['label']} | pitch {cue['pitch']:.1f} | roll {cue['roll']:.1f} deg", color))
 
         if lines:
