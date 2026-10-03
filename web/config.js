@@ -56,7 +56,7 @@ const CONFIG = {
     "windowSec": 30.0,
     "calmSec": 5.0,
     "persistSec": {
-      "eyes": 1.5,
+      "eyes": 3.0,
       "mouth": null,
       "head": 4.0
     },
