@@ -206,9 +206,11 @@ class LiveMonitor:
                     cues = {side: self._eye(frame, side, eye) for side, eye in regions.eyes.items()}
                     cues["mouth"] = self._mouth(regions.mouth) if regions.mouth else None
                     cues["head"] = self._head(regions.pitch, regions.roll)
-                eyes = [cues[side]["score"] for side in ("left", "right") if cues.get(side)]
+                # The eye nearer the camera looks wider, so it counts more.
+                eyes = [(cues[side]["score"], regions.eyes[side].width) for side in ("left", "right") if cues.get(side)]
+                eye_weight = sum(width for _, width in eyes)
                 scores = {
-                    "eyes": sum(eyes) / len(eyes) if eyes else None,
+                    "eyes": sum(score * width for score, width in eyes) / eye_weight if eye_weight else None,
                     "mouth": cues["mouth"]["score"] if cues.get("mouth") else None,
                     "head": cues["head"]["score"] if cues.get("head") else None,
                 }

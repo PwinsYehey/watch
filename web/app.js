@@ -59,7 +59,34 @@ function removeGlare(sourceCanvas, targetCtx) {
     }
   }
 
+  liftLowLight(data);
   targetCtx.putImageData(sharp, 0, 0);
+}
+
+// Mirrors brighten in src/watch/face.py.
+function liftLowLight(data) {
+  let sum = 0, count = 0;
+  for (let i = 0; i < data.length; i += 64) {
+    sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    count++;
+  }
+  const mean = sum / count / 255, target = CONFIG.live.lowLightTarget;
+  if (mean >= CONFIG.live.lowLightMean || mean <= 0) return;
+  const gamma = Math.log(target) / Math.log(mean);
+  const lut = new Uint8ClampedArray(256);
+  for (let v = 0; v < 256; v++) lut[v] = Math.pow(v / 255, gamma) * 255;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]];
+    data[i + 1] = lut[data[i + 1]];
+    data[i + 2] = lut[data[i + 2]];
+  }
+}
+
+function liftLowLightCanvas(targetCtx) {
+  const { width, height } = targetCtx.canvas;
+  const image = targetCtx.getImageData(0, 0, width, height);
+  liftLowLight(image.data);
+  targetCtx.putImageData(image, 0, 0);
 }
 
 function isGlarePixel(r, g, b) {
@@ -179,8 +206,16 @@ cropCanvas.height = CONFIG.imageSize[1];
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
 
 // Mirrors Classifier.predict in src/watch/model.py.
-async function predictClassState(model, sourceCanvas, box, classNames, positiveClass, desaturate = false) {
-  cropCtx.drawImage(sourceCanvas, box.xMin, box.yMin, box.xMax - box.xMin, box.yMax - box.yMin, 0, 0, cropCanvas.width, cropCanvas.height);
+async function predictClassState(model, sourceCanvas, crop, classNames, positiveClass, desaturate = false) {
+  cropCtx.fillStyle = "#000";
+  cropCtx.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+  cropCtx.save();
+  cropCtx.scale(cropCanvas.width / crop.width, cropCanvas.height / crop.height);
+  cropCtx.translate(-crop.xMin, -crop.yMin);
+  cropCtx.rotate(-crop.angle);
+  cropCtx.translate(-crop.cx, -crop.cy);
+  cropCtx.drawImage(sourceCanvas, 0, 0);
+  cropCtx.restore();
   const predictionTensor = tf.tidy(() => {
     let input = tf.browser.fromPixels(cropCanvas).toFloat();
     if (desaturate) {
@@ -233,6 +268,8 @@ function ensureModels() {
         runningMode: "VIDEO",
         numFaces: 1,
         outputFacialTransformationMatrixes: true,
+        minFaceDetectionConfidence: CONFIG.live.faceDetectionConfidence,
+        minTrackingConfidence: CONFIG.live.faceTrackingConfidence,
       });
 
       drawingUtils = new DrawingUtils(ctx);
@@ -265,8 +302,8 @@ function ensureBlazeface() {
   return blazefacePromise;
 }
 
-async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
-  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
+async function drawEye(side, box, crop, ear, model, earCfg, landmarks, smoother) {
+  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, crop, CONFIG.eyeClassNames, "eyes_closed", true);
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
   // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.
@@ -277,11 +314,11 @@ async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
 
   const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE : FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
   drawingUtils.drawConnectors(landmarks, connectors, { color: label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
-  return { closedness, label, ear, cnnClosedness };
+  return { closedness, label, ear, cnnClosedness, width: screenWidth(landmarks, side === "left" ? LEFT_EYE_AXIS : RIGHT_EYE_AXIS, canvas.width, canvas.height) };
 }
 
-async function drawMouth(box, mar, model, landmarks) {
-  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.yawnClassNames, "yawn");
+async function drawMouth(crop, mar, model, landmarks) {
+  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, crop, CONFIG.yawnClassNames, "yawn");
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
@@ -300,6 +337,25 @@ function headPoseStatus(pitch, roll, landmarks) {
   const label = droop >= CONFIG.nod.closednessThreshold ? "nodding" : "upright";
   drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
   return { droop, label, pitch, roll };
+}
+
+function readableRegions(lm, w, h) {
+  const region = (ids, axis, margin, square) => {
+    const box = boxFromLandmarks(lm, ids, w, h, margin, square);
+    const crop = box && !isLowDetail(box) ? alignedCropFromLandmarks(lm, ids, axis, w, h, margin, square) : null;
+    return crop ? { box, crop } : null;
+  };
+  return {
+    left: region(LEFT_EYE_IDS, LEFT_EYE_AXIS, 0.15, true),
+    right: region(RIGHT_EYE_IDS, RIGHT_EYE_AXIS, 0.15, true),
+    mouth: region(MOUTH_IDS, MOUTH_AXIS, 0.3),
+  };
+}
+
+function eyeClosednessOf(readings) {
+  const eyes = readings.filter(Boolean);
+  const total = eyes.reduce((s, r) => s + r.width, 0);
+  return total ? eyes.reduce((s, r) => s + r.closedness * r.width, 0) / total : null;
 }
 
 function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
@@ -385,7 +441,8 @@ async function main() {
   originalPanel.hidden = true;
   scannedLabel.hidden = true;
   statusEl.textContent = "Loading models...";
-  const { eyeModel, yawnModel, faceLandmarker } = await ensureModels();
+  const { eyeModel, yawnModel, faceLandmarker, vision, baseOptions } = await ensureModels();
+  const zoomLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
 
   statusEl.textContent = "Requesting camera...";
   const stream = await navigator.mediaDevices.getUserMedia({ video: { width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT } });
@@ -480,7 +537,9 @@ async function main() {
       }
       updateMirror();
       removeGlare(mirrorCanvas, glareCleanCtx);
-      const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
+      let result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
+      // Retry faces the tracker misses, such as one far from the camera.
+      if (!result.faceLandmarks.length) result = (await detectZoomed(zoomLandmarker, glareCleanCanvas)) || result;
       const faceFound = result.faceLandmarks.length > 0;
 
       if (!faceFound) {
@@ -504,34 +563,18 @@ async function main() {
         const lm = result.faceLandmarks[0];
         const w = canvas.width, h = canvas.height;
 
-        const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
-        const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-        const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
-        const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
-        const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-        const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
-        const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
-        const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
-
-        if (leftBox || rightBox) {
-          const calls = [];
-          if (leftBox) calls.push(drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother));
-          if (rightBox) calls.push(drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother));
-          if (mouthBox) calls.push(drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm));
-          const results = await Promise.all(calls);
-          let idx = 0;
-          if (leftBox) leftResult = results[idx++];
-          if (rightBox) rightResult = results[idx++];
-          if (mouthBox) mouthResult = results[idx++];
-
-          const eyeReadings = [leftResult, rightResult].filter(Boolean);
-          eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
-          mouthOpenness = mouthResult ? mouthResult.openness : null;
-          if (result.facialTransformationMatrixes.length) {
-            const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
-            headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
-            headDroop = headResult?.droop ?? null;
-          }
+        const regions = readableRegions(lm, w, h);
+        [leftResult, rightResult, mouthResult] = await Promise.all([
+          regions.left && drawEye("left", regions.left.box, regions.left.crop, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), eyeModel, earCfg, lm, leftEyeSmoother),
+          regions.right && drawEye("right", regions.right.box, regions.right.crop, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), eyeModel, earCfg, lm, rightEyeSmoother),
+          regions.mouth && drawMouth(regions.mouth.crop, mouthAspectRatio(lm, w, h), yawnModel, lm),
+        ]);
+        eyeClosedness = eyeClosednessOf([leftResult, rightResult]);
+        mouthOpenness = mouthResult ? mouthResult.openness : null;
+        if (result.facialTransformationMatrixes.length) {
+          const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+          headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
+          headDroop = headResult?.droop ?? null;
         }
       }
       drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
@@ -577,9 +620,14 @@ function drawSnapshotBanner(state) {
   displayCtx.fillText(BANNER_TEXT[state], 20, 34);
 }
 
-async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
+const zoomCanvas = document.createElement("canvas");
+const zoomCtx = zoomCanvas.getContext("2d");
+
+// Mirrors FaceTracker._landmarks in src/watch/face.py.
+async function detectZoomed(landmarker, source) {
+  const w = source.width, h = source.height;
   const blazefaceModel = await ensureBlazeface();
-  const faces = await blazefaceModel.estimateFaces(mirrorCanvas, false);
+  const faces = await blazefaceModel.estimateFaces(source, false);
   if (!faces.length) return null;
 
   const [x1, y1] = faces[0].topLeft;
@@ -592,17 +640,14 @@ async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
   const cropH = Math.min(h, y2 + boxH * pad) - cropY;
   if (cropW <= 0 || cropH <= 0) return null;
 
-  const cropped = document.createElement("canvas");
-  cropped.width = w;
-  cropped.height = h;
-  cropped.getContext("2d").drawImage(mirrorCanvas, cropX, cropY, cropW, cropH, 0, 0, w, h);
+  zoomCanvas.width = 256;
+  zoomCanvas.height = Math.round((256 * cropH) / cropW);
+  zoomCtx.drawImage(source, cropX, cropY, cropW, cropH, 0, 0, zoomCanvas.width, zoomCanvas.height);
 
-  const retryResult = uploadFaceLandmarker.detect(cropped);
-  if (!retryResult.faceLandmarks.length) return null;
-
-  mirrorCtx.clearRect(0, 0, w, h);
-  mirrorCtx.drawImage(cropped, 0, 0);
-  return retryResult;
+  const zoomed = landmarker.detect(zoomCanvas);
+  if (!zoomed.faceLandmarks.length) return null;
+  const toFrame = (p) => ({ x: (cropX + p.x * cropW) / w, y: (cropY + p.y * cropH) / h, z: (p.z * cropW) / w });
+  return { ...zoomed, faceLandmarks: zoomed.faceLandmarks.map((face) => face.map(toFrame)) };
 }
 
 function blitUnmirrored() {
@@ -667,19 +712,14 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   glareCleanCanvas.width = mirrorCanvas.width;
   glareCleanCanvas.height = mirrorCanvas.height;
   glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
+  liftLowLightCanvas(glareCleanCtx);
 
   statusEl.textContent = "";
-  let result = uploadFaceLandmarker.detect(mirrorCanvas);
+  let result = uploadFaceLandmarker.detect(glareCleanCanvas);
   if (!result.faceLandmarks.length) {
     statusEl.textContent = "No face found directly -- retrying with a coarser detector...";
-    const retried = await tryCropAndRetry(uploadFaceLandmarker, w, h);
+    result = (await detectZoomed(uploadFaceLandmarker, glareCleanCanvas)) || result;
     statusEl.textContent = "";
-    if (retried) {
-      result = retried;
-      ctx.drawImage(mirrorCanvas, 0, 0);
-      glareCleanCtx.clearRect(0, 0, glareCleanCanvas.width, glareCleanCanvas.height);
-      glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
-    }
   }
 
   if (!result.faceLandmarks.length) {
@@ -689,31 +729,16 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   }
 
   const lm = result.faceLandmarks[0];
-  const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
-  const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-  const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
-  const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
-  const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-  const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
-  const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
-  const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
-
-  if (!leftBox && !rightBox) {
-    finalBlit();
-    drawSnapshotBanner("no_face");
-    return;
-  }
-
-  const left = leftBox ? await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm) : null;
-  const right = rightBox ? await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm) : null;
-  const mouth = mouthBox ? await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm) : null;
+  const regions = readableRegions(lm, w, h);
+  const left = regions.left ? await drawEye("left", regions.left.box, regions.left.crop, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), eyeModel, earCfg, lm) : null;
+  const right = regions.right ? await drawEye("right", regions.right.box, regions.right.crop, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), eyeModel, earCfg, lm) : null;
+  const mouth = regions.mouth ? await drawMouth(regions.mouth.crop, mouthAspectRatio(lm, w, h), yawnModel, lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
     const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
     head = headPoseStatus(headPose.pitch, headPose.roll, lm);
   }
-  const eyeReadings = [left, right].filter(Boolean);
-  const eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
+  const eyeClosedness = eyeClosednessOf([left, right]);
   const notAlert =
     (eyeClosedness !== null && eyeClosedness >= CONFIG.alertness.closednessThreshold) ||
     (mouth !== null && mouth.openness >= CONFIG.yawn.closednessThreshold) ||

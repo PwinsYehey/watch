@@ -56,6 +56,11 @@ const CONFIG = {
     "minCnnConfidence": 0.65,
     "earGlareTolerance": 0.15,
     "lowDetailStd": 12.0,
+    "lowLightMean": 0.3,
+    "lowLightTarget": 0.45,
+    "levelMinAngleDeg": 15,
+    "faceDetectionConfidence": 0.3,
+    "faceTrackingConfidence": 0.5,
     "recalibrateGapSec": 3.0,
     "smoothingWindow": 5
   }

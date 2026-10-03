@@ -5,13 +5,21 @@ const LEFT_EYE_IDS = [33, 133, 159, 145, 160, 144, 158, 153];
 const RIGHT_EYE_IDS = [362, 263, 386, 374, 385, 380, 387, 373];
 const MOUTH_IDS = [61, 291, 13, 14, 78, 308, 0, 17];
 const MOUTH_MAR_POINTS = { horizontal: [61, 291], vertical: [13, 14] };
+const LEFT_EYE_AXIS = [33, 133];
+const RIGHT_EYE_AXIS = [362, 263];
+const MOUTH_AXIS = [61, 291];
 
+// 3D keeps ratios steady when the face turns.
 function pointPx(landmarks, index, w, h) {
-  return { x: landmarks[index].x * w, y: landmarks[index].y * h };
+  return { x: landmarks[index].x * w, y: landmarks[index].y * h, z: (landmarks[index].z || 0) * w };
 }
 
 function dist(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function screenWidth(landmarks, axis, w, h) {
+  return Math.hypot((landmarks[axis[0]].x - landmarks[axis[1]].x) * w, (landmarks[axis[0]].y - landmarks[axis[1]].y) * h);
 }
 
 function eyeAspectRatio(landmarks, w, h, points) {
@@ -56,6 +64,30 @@ function boxFromLandmarks(landmarks, ids, w, h, margin, square = false) {
   if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) return null;
   if (xMax <= xMin || yMax <= yMin) return null;
   return { xMin, yMin, xMax, yMax };
+}
+
+// Mirrors aligned_crop in src/watch/face.py.
+function alignedCropFromLandmarks(landmarks, ids, axis, w, h, margin, square = false) {
+  const [a, b] = axis.map((i) => pointPx(landmarks, i, w, h));
+  const tilt = Math.atan2(b.y - a.y, b.x - a.x);
+  const angle = Math.abs((tilt * 180) / Math.PI) < CONFIG.live.levelMinAngleDeg ? 0 : tilt;
+  const points = ids.map((i) => pointPx(landmarks, i, w, h));
+  const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
+  const cy = points.reduce((s, p) => s + p.y, 0) / points.length;
+  const cos = Math.cos(-angle), sin = Math.sin(-angle);
+  const xs = points.map((p) => cos * (p.x - cx) - sin * (p.y - cy));
+  const ys = points.map((p) => sin * (p.x - cx) + cos * (p.y - cy));
+
+  let xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const padX = (xMax - xMin) * margin, padY = (yMax - yMin) * margin;
+  xMin -= padX; xMax += padX; yMin -= padY; yMax += padY;
+  if (square) {
+    const mx = (xMin + xMax) / 2, my = (yMin + yMax) / 2;
+    const half = Math.max(xMax - xMin, yMax - yMin) / 2;
+    xMin = mx - half; xMax = mx + half; yMin = my - half; yMax = my + half;
+  }
+  if (!(xMax > xMin && yMax > yMin)) return null;
+  return { cx, cy, angle, xMin, yMin, width: xMax - xMin, height: yMax - yMin };
 }
 
 // Approximates the solvePnP head pose from MediaPipe's transform matrix, in degrees.
