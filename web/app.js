@@ -149,6 +149,13 @@ const MOUTH_COLOR = "#ffc800";
 const HEAD_COLOR = "#ff00c8";
 const BANNER_COLORS = { alert: "#00c800", not_alert: "#dc0000", no_face: "#ffa500" };
 const BANNER_TEXT = { alert: "ALERT", not_alert: "NOT ALERT", no_face: "NO FACE DETECTED" };
+// Mirrors BANNERS in src/watch/live.py.
+const LEVEL_BANNERS = {
+  0: { text: "NORMAL", color: "#00c800" },
+  1: { text: "WARNING", color: "#ffd700" },
+  2: { text: "CRITICAL", color: "#dc0000" },
+  no_face: { text: "NO FACE DETECTED", color: "#787878" },
+};
 
 function linearScore(value, lowAtZero, highAtOne) {
   const span = highAtOne - lowAtZero;
@@ -394,18 +401,18 @@ function eyeClosednessOf(readings) {
   return total ? eyes.reduce((s, r) => s + r.closedness * r.width, 0) / total : null;
 }
 
-function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
-  ctx.fillStyle = BANNER_COLORS[state];
+function drawBanner(escalation, faceFound, eyeStatus, yawnStatus, nodStatus) {
+  const banner = LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
+  ctx.fillStyle = banner.color;
   ctx.fillRect(0, 0, canvas.width, 50);
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = escalation.level === 1 ? "#000000" : "#ffffff";
   ctx.font = "bold 18px sans-serif";
-  ctx.fillText(BANNER_TEXT[state], 20, 34);
+  ctx.fillText(escalation.reason ? `${banner.text}: ${escalation.reason}` : banner.text, 20, 34);
+  ctx.fillStyle = "#ffffff";
   ctx.font = "10px sans-serif";
-  ctx.fillText(
-    `eyes closed ${eyeStatus.closedDuration.toFixed(1)}s | mouth open ${yawnStatus.closedDuration.toFixed(1)}s | head drooped ${nodStatus.closedDuration.toFixed(1)}s`,
-    20,
-    70
-  );
+  let detail = `eyes closed ${eyeStatus.closedDuration.toFixed(1)}s | mouth open ${yawnStatus.closedDuration.toFixed(1)}s | head drooped ${nodStatus.closedDuration.toFixed(1)}s`;
+  if (escalation.level === 1) detail += ` | watching ${escalation.windowLeft.toFixed(0)}s`;
+  ctx.fillText(detail, 20, 70);
 }
 
 function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
@@ -553,6 +560,7 @@ async function main() {
     closednessThreshold: CONFIG.yawn.closednessThreshold,
     dipGracePeriod: CONFIG.yawn.dipGracePeriodSec,
   });
+  const escalationMonitor = new EscalationMonitor(CONFIG.escalation);
   const nodMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.nod.closedDurationThresholdSec,
     perclosWindow: CONFIG.nod.perclosWindowSec,
@@ -580,10 +588,10 @@ async function main() {
       if (!faceFound) {
         if (noFaceSince === null) noFaceSince = performance.now();
       } else if (noFaceSince !== null) {
-        // A face returning after a real gap is likely a new driver.
+        // A face returning after a real gap is likely a new driver, unless a warning is being held.
         const gap = performance.now() - noFaceSince;
         noFaceSince = null;
-        if (gap >= CONFIG.live.recalibrateGapSec * 1000) {
+        if (gap >= CONFIG.live.recalibrateGapSec * 1000 && escalationMonitor.level === 0) {
           await runCalibration();
           requestAnimationFrame(frame);
           return;
@@ -619,15 +627,11 @@ async function main() {
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
 
-      let overallState;
-      if (eyeStatus.state === "no_face") overallState = "no_face";
-      else if ([eyeStatus.state, yawnStatus.state, nodStatus.state].includes("not_alert")) overallState = "not_alert";
-      else overallState = "alert";
-
-      if (overallState === "not_alert") startAlarm();
+      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, faceFound, now);
+      if (escalation.level === 2) startAlarm();
       else stopAlarm();
 
-      drawBanner(overallState, eyeStatus, yawnStatus, nodStatus);
+      drawBanner(escalation, faceFound, eyeStatus, yawnStatus, nodStatus);
 
       const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
       prevTime = now;

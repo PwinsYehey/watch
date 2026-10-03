@@ -6,14 +6,15 @@ import time
 import cv2
 import numpy as np
 
-from watch.alertness import AlertnessMonitor, RollingMedian
+from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian
 from watch.config import load_config
 from watch.face import FACE_MESH, FaceTracker
 from watch.model import Classifier
 
 WINDOW = "WATCH - Live Alertness Monitoring (press q to quit)"
 GREEN, RED, AMBER, MAGENTA, ORANGE = (0, 200, 0), (0, 0, 220), (255, 200, 0), (255, 0, 200), (0, 165, 255)
-BANNERS = {"alert": ("ALERT", GREEN), "not_alert": ("NOT ALERT", RED), "no_face": ("NO FACE DETECTED", ORANGE)}
+YELLOW, GRAY = (0, 215, 255), (120, 120, 120)
+BANNERS = {0: ("NORMAL", GREEN), 1: ("WARNING", YELLOW), 2: ("CRITICAL", RED), "no_face": ("NO FACE DETECTED", GRAY)}
 EYE_CONTOURS = {"left": FACE_MESH.FACEMESH_RIGHT_EYE, "right": FACE_MESH.FACEMESH_LEFT_EYE}
 
 
@@ -80,6 +81,7 @@ class LiveMonitor:
         window = self.settings["smoothing_window"]
         self.smoothers = {key: RollingMedian(window) for key in ("left", "right", "eyes", "mouth", "head")}
         self.monitors = {key: AlertnessMonitor(**self.config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"))}
+        self.escalation = EscalationMonitor(**self.config["escalation"])
 
     def _read(self):
         ok, frame = self.capture.read()
@@ -149,7 +151,7 @@ class LiveMonitor:
         label = "nodding" if droop >= self.config["nod"]["closedness_threshold"] else "upright"
         return {"score": droop, "label": label, "pitch": pitch, "roll": roll}
 
-    def _draw(self, frame, regions, cues, state, statuses, fps):
+    def _draw(self, frame, regions, cues, escalation, statuses, fps):
         h, w = frame.shape[:2]
 
         def point(i):
@@ -191,10 +193,14 @@ class LiveMonitor:
             for i, (text, color) in enumerate(lines):
                 cv2.putText(frame, text, (18, 88 + 22 * (i + 1)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
-        text, color = BANNERS[state]
+        text, color = BANNERS["no_face" if regions is None and escalation.level == 0 else escalation.level]
+        if escalation.reason:
+            text += f": {escalation.reason}"
         cv2.rectangle(frame, (0, 0), (w, 50), color, -1)
-        cv2.putText(frame, text, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+        cv2.putText(frame, text, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0) if color == YELLOW else (255, 255, 255), 2)
         detail = " | ".join(f"{label} {statuses[key].closed_duration:.1f}s" for key, label in (("eyes", "eyes closed"), ("mouth", "mouth open"), ("head", "head drooped")))
+        if escalation.level == 1:
+            detail += f" | watching {escalation.window_left:.0f}s"
         cv2.putText(frame, detail, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(frame, f"FPS: {fps:.1f}", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
@@ -207,9 +213,9 @@ class LiveMonitor:
                 if regions is None:
                     no_face_since = no_face_since or time.time()
                 elif no_face_since is not None:
-                    # A face returning after a real gap is likely a new driver.
+                    # A face returning after a real gap is likely a new driver, unless a warning is being held.
                     gap, no_face_since = time.time() - no_face_since, None
-                    if gap >= self.settings["recalibrate_gap_sec"]:
+                    if gap >= self.settings["recalibrate_gap_sec"] and self.escalation.level == 0:
                         self.calibrate()
                         continue
 
@@ -229,15 +235,10 @@ class LiveMonitor:
 
                 now = time.time()
                 statuses = {key: self.monitors[key].update(self.smoothers[key].add(score), now) for key, score in scores.items()}
-                if statuses["eyes"].state == "no_face":
-                    state = "no_face"
-                elif any(status.state == "not_alert" for status in statuses.values()):
-                    state = "not_alert"
-                else:
-                    state = "alert"
-                self.alarm.set(state == "not_alert")
+                escalation = self.escalation.update(statuses, regions is not None, now)
+                self.alarm.set(escalation.level == 2)
 
-                self._draw(frame, regions, cues, state, statuses, 1.0 / max(now - previous, 1e-6))
+                self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6))
                 previous = now
                 cv2.imshow(WINDOW, frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):

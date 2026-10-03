@@ -52,6 +52,20 @@ const CONFIG = {
     "droopedOffset": 25.0,
     "rollDroopedOffset": 25.0
   },
+  "escalation": {
+    "windowSec": 30.0,
+    "calmSec": 10.0,
+    "persistSec": {
+      "eyes": 3.0,
+      "mouth": null,
+      "head": 4.0
+    },
+    "repeatCount": {
+      "eyes": 2,
+      "mouth": 3,
+      "head": 2
+    }
+  },
   "live": {
     "minCnnConfidence": 0.65,
     "earGlareTolerance": 0.15,

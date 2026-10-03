@@ -8,7 +8,7 @@ import tensorflow as tf
 from watch.config import MODEL_NAMES, load_config, model_path
 from watch.model import load_model
 
-WEB_CONFIG_SECTIONS = ("alertness", "yawn", "nod", "ear", "mar", "head_pose", "calibration", "live")
+WEB_CONFIG_SECTIONS = ("alertness", "yawn", "nod", "ear", "mar", "head_pose", "calibration", "escalation", "live")
 
 
 def _camel(key: str) -> str:

@@ -78,6 +78,14 @@ yawn:
   closedness_threshold: 0.5
   dip_grace_period_sec: 0.5
 
+# A cue event (eyes, yawn or head crossing the limits above) gives a warning. A repeat, a second cue,
+# or the event lasting persist_sec within window_sec makes it critical. Critical clears after calm_sec.
+escalation:
+  window_sec: 30.0
+  calm_sec: 10.0
+  persist_sec: {eyes: 3.0, mouth: null, head: 4.0}
+  repeat_count: {eyes: 2, mouth: 3, head: 2}
+
 # Head counts as drooped only once it reaches the full drooped angle below.
 nod:
   closed_duration_threshold_sec: 2.0
