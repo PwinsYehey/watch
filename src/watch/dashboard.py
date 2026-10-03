@@ -93,7 +93,7 @@ class DashboardView:
         glyphs, left, top = cached
         self._canvas.paste(glyphs, (int(xy[0] + left), int(xy[1] + top)), glyphs)
 
-    def render(self, frame_bgr, level: Level, signs, checks, calibration, events, live: bool, muted: bool, readings=()) -> np.ndarray:
+    def render(self, frame_bgr, level: Level, signs, checks, calibration, events, live: bool, muted: bool, readings=(), notice="") -> np.ndarray:
         """Returns the whole window as a BGR image."""
         image = self._canvas = self._base.copy()
         draw = ImageDraw.Draw(image)
@@ -101,7 +101,7 @@ class DashboardView:
 
         # Video card with the controls row under it.
         self._video(image, frame_bgr, (MARGIN + PAD, card_top + PAD))
-        self._controls(draw, MARGIN + PAD, card_top + PAD + VIDEO_H + 10, live, muted)
+        self._controls(draw, MARGIN + PAD, card_top + PAD + VIDEO_H + 10, live, muted, notice)
 
         # Dashboard: alert level, signs, detection and calibration on the left; recent events on the right.
         left = self._dash_left
@@ -140,11 +140,11 @@ class DashboardView:
         slot[y : y + resized.shape[0], x : x + resized.shape[1]] = resized[:, :, ::-1]
         image.paste(Image.fromarray(slot), origin, self._video_mask)
 
-    def _controls(self, draw, x, y, live, muted):
+    def _controls(self, draw, x, y, live, muted, notice=""):
         """Key hints styled like the web buttons, since the window has no clickable controls."""
         keys = [("Q", "Quit")]
         if live:
-            keys.append(("M", "Unmute alarm" if muted else "Mute alarm"))
+            keys += [("M", "Unmute alarm" if muted else "Mute alarm"), ("E", "Export")]
         for key, action in keys:
             width = 46 + int(draw.textlength(action, self.fonts["body"]))
             draw.rounded_rectangle((x, y, x + width, y + CONTROLS_H), 8, SURFACE_2, BORDER)
@@ -152,7 +152,9 @@ class DashboardView:
             self._text((x + 17, y + 17), key, TEXT, "key", "mm")
             self._text((x + 34, y + 17), action, TEXT, "body", "lm")
             x += width + 10
-        if live:
+        if notice:
+            self._text((x + 4, y + 17), notice, GREEN, "small", "lm")
+        elif live:
             draw.ellipse((x + 4, y + 13, x + 12, y + 21), (255, 77, 77))
             self._text((x + 18, y + 17), "Live", MUTED, "body", "lm")
 
