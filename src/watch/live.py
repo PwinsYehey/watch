@@ -10,6 +10,7 @@ import numpy as np
 from watch import dashboard as ui
 from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian, head_droop
 from watch.config import load_config
+from watch.report import LEVEL_NAMES, SessionLog
 from watch.face import FACE_MESH, FaceTracker, mean_brightness
 from watch.model import Classifier
 
@@ -94,6 +95,8 @@ class LiveMonitor:
         self.events = deque(maxlen=50)
         self.calibrated = False
         self.muted = False
+        self.session = SessionLog()
+        self._notice, self._notice_until = "", 0.0
         self._reset()
 
     def _reset(self):
@@ -118,6 +121,7 @@ class LiveMonitor:
             if frame is None:
                 break
             regions = self.tracker.extract(remove_glare(frame))
+            self.session.add(time.time(), "Calibrating")
             if regions:
                 ears += [eye.ratio for eye in regions.eyes.values()]
                 if regions.pitch is not None:
@@ -199,7 +203,8 @@ class LiveMonitor:
                 cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
 
         level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness)
-        return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings)
+        notice = self._notice if time.time() < self._notice_until else ""
+        return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings, notice=notice)
 
     def _dashboard(self, regions, cues, escalation, statuses, fps, brightness):
         """The dashboard contents, mirroring updateDashboard and showCalibration in web/app.js."""
@@ -241,7 +246,7 @@ class LiveMonitor:
             ui.Row(None, "Head tilt", f"\u2265 {self.head['roll_drooped_threshold']:.1f}\u00b0"),
         ]
         # What is being measured right now, to compare with the calibrated limits; red once past them.
-        ear = np.mean([cue["ratio"] for cue in eyes]) if eyes else None
+        ear = self._readings(cues)["ear"]
         readings = [
             ("Eyes (EAR)", "-" if ear is None else f"{ear:.2f}", ear is not None and ear <= self.ear["closed_threshold"]),
             ("Mouth (MAR)", f"{mouth['ratio']:.2f}" if mouth else "-", bool(mouth) and mouth["label"] == "yawn"),
@@ -250,6 +255,26 @@ class LiveMonitor:
         ]
         readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
         return level, signs, checks, calibration, readings
+
+    @staticmethod
+    def _readings(cues):
+        eyes = [cues[side]["ratio"] for side in ("left", "right") if cues.get(side)]
+        mouth, head = cues.get("mouth"), cues.get("head")
+        return {
+            "ear": float(np.mean(eyes)) if eyes else None,
+            "mar": mouth["ratio"] if mouth else None,
+            "head_down": head["pitch"] if head else None,
+            "head_tilt": head["roll"] if head else None,
+        }
+
+    def _limits(self):
+        return {"ear_closed": self.ear["closed_threshold"], "head_down": self.head["drooped_threshold"], "head_tilt": self.head["roll_drooped_threshold"]}
+
+    def export(self):
+        """Saves the session so far as a PNG report and a CSV under results/sessions."""
+        png, csv_path = self.session.save(self.config["paths"]["results_dir"] / "sessions")
+        print(f"Saved {png} and {csv_path}")
+        self._notice, self._notice_until = f"Saved {png.name}", time.time() + 4
 
     def _event_lines(self):
         """Recent level changes, newest first."""
@@ -271,6 +296,7 @@ class LiveMonitor:
                     if gap >= self.settings["recalibrate_gap_sec"]:
                         self.calibrate()
                         self.events.append((time.strftime("%H:%M:%S"), 0, "recalibrated"))
+                        self.session.event("Recalibrated")
                         continue
 
                 cues = {}
@@ -295,6 +321,9 @@ class LiveMonitor:
                 if escalation.level != self._level:
                     self._level = escalation.level
                     self.events.append((time.strftime("%H:%M:%S"), escalation.level, escalation.reason))
+                    self.session.event(f"{LEVEL_NAMES[escalation.level]}: {escalation.reason}".rstrip(": "))
+                state = "No face" if regions is None and escalation.level == 0 else LEVEL_NAMES[escalation.level]
+                self.session.add(now, state, self._readings(cues), self._limits())
 
                 view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame))
                 previous = now
@@ -304,6 +333,8 @@ class LiveMonitor:
                     break
                 if key == ord("m"):
                     self.muted = not self.muted
+                if key == ord("e"):
+                    self.export()
         finally:
             self.alarm.set(False)
             self.capture.release()

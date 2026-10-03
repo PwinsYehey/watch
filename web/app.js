@@ -172,6 +172,9 @@ const cameraIcon = document.getElementById("cameraIcon");
 const liveDot = document.getElementById("liveDot");
 const uploadBtn = document.getElementById("uploadBtn");
 const muteBtn = document.getElementById("muteBtn");
+const exportBtn = document.getElementById("exportBtn");
+let session = new SessionLog();
+let sessionLevel = 0;
 const imageUpload = document.getElementById("imageUpload");
 
 let cameraActive = false;
@@ -614,6 +617,7 @@ async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffse
     updateMirror();
     removeGlare(mirrorCanvas, glareCleanCtx);
     const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
+    session.add(Date.now() / 1000, "Calibrating");
     ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
@@ -667,6 +671,9 @@ async function main() {
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
   resetDashboard();
+  session = new SessionLog();
+  sessionLevel = 0;
+  exportBtn.hidden = false;
   setDashLevel("STARTING", "#2a2f3a", "Getting the camera ready", "", false);
   setDashboardVisible(true);
   placeholder.hidden = true;
@@ -784,6 +791,8 @@ async function main() {
           resetMonitors();
           dashLastLevel = 0;
           dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: 0, reason: "recalibrated" });
+          session.event("Recalibrated");
+          sessionLevel = 0;
           requestAnimationFrame(frame);
           return;
         }
@@ -818,6 +827,17 @@ async function main() {
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
 
       const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, faceFound, now);
+      if (escalation.level !== sessionLevel) {
+        sessionLevel = escalation.level;
+        session.event(escalation.reason ? `${REPORT_LEVEL_NAMES[escalation.level]}: ${escalation.reason}` : REPORT_LEVEL_NAMES[escalation.level]);
+      }
+      const ears = [leftResult, rightResult].filter(Boolean).map((r) => r.ear);
+      session.add(
+        Date.now() / 1000,
+        !faceFound && escalation.level === 0 ? "No face" : REPORT_LEVEL_NAMES[escalation.level],
+        { ear: ears.length ? ears.reduce((a, b) => a + b, 0) / ears.length : null, mar: mouthResult?.mar ?? null, headDown: headResult?.pitch ?? null, headTilt: headResult?.roll ?? null },
+        { earClosed: earCfg.closedThreshold, headDown: headPoseCfg.droopedThreshold, headTilt: headPoseCfg.rollDroopedThreshold },
+      );
       if (escalation.level === 2) startAlarm();
       else stopAlarm();
 
@@ -1092,6 +1112,29 @@ startBtn.addEventListener("click", () => {
     console.error(err);
     startBtn.disabled = false;
   });
+});
+
+function download(blob, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+// Mirrors LiveMonitor.export in src/watch/live.py: a PNG report with graphs and a CSV of the readings.
+exportBtn.addEventListener("click", () => {
+  if (!session.samples.length) {
+    statusEl.textContent = "Nothing recorded yet. Start the camera first.";
+    return;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  const d = new Date();
+  const stem = `watch-session-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const reportCanvas = document.createElement("canvas");
+  session.drawReport(reportCanvas);
+  reportCanvas.toBlob((blob) => blob && download(blob, `${stem}.png`), "image/png");
+  download(new Blob([session.csv()], { type: "text/csv" }), `${stem}.csv`);
 });
 
 muteBtn.addEventListener("click", () => {

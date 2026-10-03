@@ -27,7 +27,7 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 | `evaluate [eye\|yawn\|all]` | test-set report, confusion matrix and ROC curve in `results/<model>/` |
 | `benchmark [eye\|yawn\|all]` | inference latency and model size |
 | `export` | write `web/models/`, `web/config.js` and `models/*.tflite` |
-| `live` | webcam monitor (`--camera N`), press `q` to quit |
+| `live` | webcam monitor (`--camera N`): `q` quit, `m` mute, `e` export a session report |
 | `web` | serve the browser demo at http://localhost:8765 (`--port N`) |
 | `predict <image>` | eye, mouth and head state for one photo |
 | `test` | run the unit tests (extra arguments go to pytest) |
@@ -43,6 +43,7 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 4. One sign gives a warning and starts a 30 s watch. It turns critical if the sign repeats, another sign appears, or it lasts (eyes closed 3 s, head drooped 4 s). Three yawns are needed on their own.
 5. Critical drops back to a warning after 5 s without signs. If the face leaves the view, the level is held; when the face comes back after 3 s or more, it recalibrates and starts again from normal.
 6. The dashboard beside the video shows the alert level, each sign with its timer, what is being detected, and recent level changes.
+7. Export saves the session so far as a PNG report with graphs of the alert level, eyes, mouth and head, plus a CSV of the readings (`E` in the live monitor, saved to `results/sessions/`; the Export button in the web demo).
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
 
