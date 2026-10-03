@@ -47,6 +47,10 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
 
+## Architecture
+
+The full flow from camera input to alerts, display and reports is in [docs/architecture-flowchart.png](docs/architecture-flowchart.png). Its source, [docs/architecture-flowchart.mmd](docs/architecture-flowchart.mmd), is a [Mermaid](https://mermaid.js.org) flowchart that can be edited and re-rendered at [mermaid.live](https://mermaid.live).
+
 ## Layout
 
 ```
@@ -58,5 +62,6 @@ data/splits/          subject-disjoint train/val/test manifests
 models/               trained .keras and exported .tflite models
 results/              evaluation output (not tracked)
 web/                  browser demo
+docs/                 architecture flowchart
 tests/                unit tests
 ```

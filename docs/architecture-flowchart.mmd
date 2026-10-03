@@ -1,0 +1,265 @@
+flowchart TD
+  classDef term fill:#e8f1fb,stroke:#2a78d6,stroke-width:2px,color:#0b0b0b
+  classDef proc fill:#ffffff,stroke:#52514e,stroke-width:1.5px,color:#0b0b0b
+  classDef dec fill:#fff6e0,stroke:#c98500,stroke-width:1.5px,color:#0b0b0b
+  classDef io fill:#eaf7f0,stroke:#1baf7a,stroke-width:1.5px,color:#0b0b0b
+  classDef store fill:#f1eefb,stroke:#4a3aa7,stroke-width:1.5px,color:#0b0b0b
+  classDef sub fill:#fdecef,stroke:#d55181,stroke-width:1.5px,color:#0b0b0b
+  classDef alert fill:#fde8e8,stroke:#d03b3b,stroke-width:2px,color:#0b0b0b
+  classDef warn fill:#fff3d6,stroke:#c98500,stroke-width:2px,color:#0b0b0b
+  classDef conn fill:#ffffff,stroke:#0b0b0b,stroke-width:1.5px,color:#0b0b0b,font-weight:bold
+  classDef ok fill:#e6f6e6,stroke:#0ca30c,stroke-width:2px,color:#0b0b0b
+
+  %% ---------------- Offline model training ----------------
+  subgraph OFF["OFFLINE · Model training (Linux / WSL2)"]
+    direction TB
+    DS@{ shape: cyl, label: "Datasets<br/>MRL Eye · CEW · NTHU-DDD · YawDD" }
+    PREP["prepare-data<br/>extract eye & mouth crops,<br/>audit, subject-disjoint splits"]
+    TRAIN["train eye CNN & yawn CNN"]
+    BETTER{"Better than current<br/>model on validation?"}
+    KEEP["Keep new model"]
+    DROP["Keep current model"]
+    EVAL["evaluate & benchmark<br/>(accuracy, ROC, latency)"]
+    EXP["export<br/>.keras · TF.js · TFLite · web/config.js"]
+    DS --> PREP --> TRAIN --> BETTER
+    BETTER -- Yes --> KEEP --> EVAL
+    BETTER -- No --> DROP --> EVAL
+    EVAL --> EXP
+  end
+
+  MODELS@{ shape: cyl, label: "Trained models<br/>eye_model · yawn_model" }
+  CFG@{ shape: cyl, label: "configs/config.yaml<br/>thresholds & timings" }
+  EXP --> MODELS
+
+  %% ---------------- Startup ----------------
+  START@{ shape: stadium, label: "Start<br/>python -m watch live · or web app: Use camera" }
+  LOAD["Load settings, eye & yawn CNNs,<br/>MediaPipe Face Mesh (+ zoom fallback detector)"]
+  OPEN@{ shape: lean-r, label: "Open camera" }
+  OPENED{"Camera opened?"}
+  CAMERR@{ shape: lean-r, label: "Show error:<br/>try another camera" }
+  CFG -.-> LOAD
+  MODELS -.-> LOAD
+  START --> LOAD --> OPEN --> OPENED
+  OPENED -- No --> CAMERR --> B3(("B"))
+  OPENED -- Yes --> CAL1@{ shape: subproc, label: "Calibrate (4 s)" }
+  CAL1 --> READ
+  AIN(("A")) -- "A · next frame" --> READ
+
+  %% ---------------- Calibration subroutine ----------------
+  subgraph CALSUB["PREDEFINED PROCESS · Calibrate (4 s)"]
+    direction TB
+    C0@{ shape: stadium, label: "Enter calibration" }
+    C1@{ shape: lean-r, label: "Read frame" }
+    C2["Remove glare · lift low light"]
+    C3["Face Mesh landmarks"]
+    C4{"Face found?"}
+    C5["Collect EAR (both eyes),<br/>head pitch & roll"]
+    CDISP@{ shape: curv-trap, label: "Dashboard: CALIBRATING<br/>+ countdown" }
+    C6{"4 s elapsed?"}
+    C7{"≥ 10 eye samples?"}
+    C8["Personal eye limits<br/>open = median EAR · closed = open − 0.10<br/>Status: personal"]
+    C9["Default eye limits<br/>Status: default"]
+    C10{"≥ 10 head samples?"}
+    C11["Personal head limits<br/>resting pitch / roll + 25°"]
+    C12["Default head limits"]
+    C13["Reset smoothers, sign monitors<br/>and alert level · stop alarm"]
+    C14@{ shape: stadium, label: "Return" }
+    C0 --> C1 --> C2 --> C3 --> C4
+    C4 -- Yes --> C5 --> CDISP
+    C4 -- No --> CDISP
+    CDISP --> C6
+    C6 -- No --> C1
+    C6 -- Yes --> C7
+    C7 -- Yes --> C8 --> C10
+    C7 -- No --> C9 --> C10
+    C10 -- Yes --> C11 --> C13
+    C10 -- No --> C12 --> C13
+    C13 --> C14
+  end
+
+  %% ---------------- Per-frame pipeline: input & preprocessing ----------------
+  subgraph PRE["1 · INPUT & PREPROCESSING (every frame)"]
+    direction TB
+    READ@{ shape: lean-r, label: "Read camera frame" }
+    GOT{"Frame available?"}
+    MIRROR["Mirror frame"]
+    GLARE["Remove glare inside last face box<br/>(visor / glasses reflections)"]
+    DARK{"Frame brightness < 0.30?"}
+    LIFT["Gamma-lift brightness to 0.45"]
+    READ --> GOT
+    GOT -- Yes --> MIRROR --> GLARE --> DARK
+    DARK -- Yes --> LIFT
+  end
+  GOT -- No --> B2(("B"))
+
+  %% ---------------- Face detection ----------------
+  subgraph DET["2 · FACE DETECTION"]
+    direction TB
+    MESH["MediaPipe Face Mesh<br/>478 face landmarks"]
+    FOUND{"Face found?"}
+    ZOOM["Full-range face detector →<br/>zoom in → Face Mesh again"]
+    FOUND2{"Face found?"}
+    BACK{"Face back after<br/>≥ 3 s away?"}
+    NOFACE["No face: start / continue absence timer<br/>all signs = not visible"]
+    MESH --> FOUND
+    FOUND -- No --> ZOOM --> FOUND2
+    FOUND2 -- No --> NOFACE
+    FOUND -- Yes --> BACK
+    FOUND2 -- Yes --> BACK
+  end
+  DARK -- No --> MESH
+  LIFT --> MESH
+  BACK -- Yes --> RECAL@{ shape: subproc, label: "Recalibrate (4 s)<br/>log 'recalibrated'" }
+  RECAL --> A1(("A"))
+
+  %% ---------------- Feature extraction ----------------
+  subgraph FEAT["3 · FEATURE EXTRACTION"]
+    direction TB
+    CROP["Crop eyes & mouth<br/>(rotate level if tilted > 15°)"]
+    DETAIL{"Crop has detail?<br/>(not a flat visor)"}
+    UNREAD["Region not readable"]
+    EYECNN["Eye CNN · both eyes in one batch<br/>closed probability"]
+    EYECONF{"CNN confidence ≥ 0.65?"}
+    EYESCORE["Eye closedness = max(CNN,<br/>3D EAR ≤ closed limit & glare < 15%)<br/>per-eye smoothing · near eye weighted more"]
+    YAWNCNN["Yawn CNN<br/>yawn probability"]
+    YAWNCONF{"CNN confidence ≥ 0.65?"}
+    MOUTHSCORE["Mouth openness = max(CNN,<br/>3D MAR scaled 0.30 → 0.60)"]
+    POSE["Head pose from landmarks<br/>pitch (down) & roll (sideways)"]
+    DROOP["Head droop = down + sideways combined<br/>vs calibrated limits (diagonals count)"]
+    CROP --> DETAIL
+    DETAIL -- No --> UNREAD
+    DETAIL -- Yes --> EYECNN --> EYECONF
+    EYECONF -- No --> UNREAD
+    EYECONF -- Yes --> EYESCORE
+    DETAIL -- Yes --> YAWNCNN --> YAWNCONF
+    YAWNCONF -- No --> UNREAD
+    YAWNCONF -- Yes --> MOUTHSCORE
+    POSE --> DROOP
+  end
+  BACK -- No --> CROP
+  BACK -- No --> POSE
+
+  %% ---------------- Sign detection ----------------
+  subgraph SIGN["4 · SIGN DETECTION"]
+    direction TB
+    SMOOTH["Rolling median over 5 frames<br/>(eyes · mouth · head)"]
+    MON["Sign monitors<br/>eyes closed ≥ 1.5 s · yawn held ≥ 2 s · head drooped ≥ 1.5 s<br/>or high average over a short window (PERCLOS)"]
+    SMOOTH --> MON
+  end
+  EYESCORE --> SMOOTH
+  MOUTHSCORE --> SMOOTH
+  DROOP --> SMOOTH
+  UNREAD --> SMOOTH
+  NOFACE --> SMOOTH
+
+  %% ---------------- Alert escalation ----------------
+  subgraph ESC["5 · ALERT ESCALATION (state machine)"]
+    direction TB
+    INVIEW{"Face in view?"}
+    HOLD["Hold current level<br/>pause the 30 s watch"]
+    LEVEL{"Current level?"}
+    NEWSIGN{"New sign?"}
+    L0["Level 0 · NORMAL"]:::ok
+    L1["Level 1 · WARNING<br/>start / restart 30 s watch"]:::warn
+    WORSE{"Sign repeats, a second sign appears,<br/>or it lasts (eyes 3 s · head 4 s)?<br/>Yawns alone: 3 within the watch"}
+    OVER{"30 s watch over<br/>and no sign active?"}
+    L2["Level 2 · CRITICAL"]:::alert
+    CALM{"Calm for 5 s?"}
+    REC["Level 1 · WARNING (recovering)<br/>new 30 s watch"]:::warn
+    INVIEW -- No --> HOLD
+    INVIEW -- Yes --> LEVEL
+    LEVEL -- 0 --> NEWSIGN
+    NEWSIGN -- Yes --> L1
+    NEWSIGN -- No --> L0
+    LEVEL -- 1 --> WORSE
+    WORSE -- Yes --> L2
+    WORSE -- No --> OVER
+    OVER -- Yes --> L0
+    OVER -- No --> L1
+    LEVEL -- 2 --> CALM
+    CALM -- Yes --> REC
+    CALM -- No --> L2
+  end
+  MON --> INVIEW
+
+  %% ---------------- Outputs ----------------
+  subgraph OUT["6 · OUTPUTS"]
+    direction TB
+    ALARMQ{"CRITICAL and not muted?"}
+    ALARMON@{ shape: lean-r, label: "Sound alarm (repeating beep)<br/>→ hardware: buzzer + strong LED" }
+    ALARMOFF["Alarm off<br/>(WARNING → hardware: soft LED)"]
+    LOG@{ shape: cyl, label: "Session log<br/>level, EAR, MAR, head angles,<br/>limits, events · every 0.25 s" }
+    SCREEN@{ shape: curv-trap, label: "Display: video with markers<br/>(eye, mouth & face brackets, head line)<br/>+ dashboard: alert level, signs, detection,<br/>calibration, live values, recent events" }
+    ALARMQ -- Yes --> ALARMON --> LOG
+    ALARMQ -- No --> ALARMOFF --> LOG
+    LOG --> SCREEN
+  end
+  L0 --> ALARMQ
+  L1 --> ALARMQ
+  L2 --> ALARMQ
+  REC --> ALARMQ
+  HOLD --> ALARMQ
+
+  %% ---------------- User controls ----------------
+  subgraph CTRL["7 · USER CONTROLS"]
+    direction TB
+    KEY@{ shape: sl-rect, label: "Key / button<br/>Q · M · E (web: Stop · Mute · Export)" }
+    WHICH{"Which input?"}
+    MUTE["Toggle mute"]
+    EXPORT["Export session"]
+    REPORT@{ shape: docs, label: "Session report<br/>PNG graphs + CSV readings" }
+    KEY --> WHICH
+    WHICH -- M / Mute --> MUTE
+    WHICH -- E / Export --> EXPORT --> REPORT
+  end
+  SCREEN --> KEY
+  WHICH -- None --> A2(("A"))
+  MUTE --> A3(("A"))
+  REPORT --> A4(("A"))
+  WHICH -- Q / Stop --> B1(("B"))
+
+  BIN(("B")) -- "B · shut down" --> CLEAN["Stop alarm · release camera · close trackers"]
+  STOP@{ shape: stadium, label: "End" }
+  CLEAN --> STOP
+
+  class START,STOP,C0,C14 term
+  class DS,MODELS,CFG,LOG store
+  class OPEN,CAMERR,C1,READ,ALARMON io
+  class CAL1,RECAL sub
+  class OPENED,BETTER,C4,C6,C7,C10,GOT,DARK,FOUND,FOUND2,BACK,DETAIL,EYECONF,YAWNCONF,INVIEW,LEVEL,NEWSIGN,WORSE,OVER,CALM,ALARMQ,WHICH dec
+
+  %% ---------------- Photo analysis ----------------
+  subgraph PHOTO["PHOTO ANALYSIS · predict &lt;image&gt; · web Upload / paste / click video to capture"]
+    direction TB
+    PSTART@{ shape: stadium, label: "Start photo analysis" }
+    PIN@{ shape: lean-r, label: "Read image file / pasted image /<br/>captured video frame" }
+    PLIFT["Lift low light (no glare removal)"]
+    PMESH["Face Mesh on the still image"]
+    PFOUND{"Face found?"}
+    PRETRY["Coarser face detector → zoom → retry"]
+    PFOUND2{"Face found?"}
+    PFEAT@{ shape: subproc, label: "Feature extraction<br/>(same as section 3)" }
+    PVERD{"Eyes closed, yawning<br/>or head drooped?"}
+    PNOT@{ shape: curv-trap, label: "Show NOT ALERT + readings<br/>Original vs Scanned" }
+    PALERT@{ shape: curv-trap, label: "Show ALERT + readings<br/>Original vs Scanned" }
+    PNOFACE@{ shape: curv-trap, label: "Show NO FACE DETECTED" }
+    PEND@{ shape: stadium, label: "End" }
+    PSTART --> PIN --> PLIFT --> PMESH --> PFOUND
+    PFOUND -- Yes --> PFEAT
+    PFOUND -- No --> PRETRY --> PFOUND2
+    PFOUND2 -- Yes --> PFEAT
+    PFOUND2 -- No --> PNOFACE --> PEND
+    PFEAT --> PVERD
+    PVERD -- Yes --> PNOT --> PEND
+    PVERD -- No --> PALERT --> PEND
+  end
+  class PSTART,PEND term
+  class PIN io
+  class PFEAT sub
+  class PFOUND,PFOUND2,PVERD dec
+  class AIN,A1,A2,A3,A4,BIN,B1,B2,B3 conn
+
+  %% Invisible links that only set the reading order of detached blocks.
+  RECAL ~~~ C0
+  A4 ~~~ BIN
+  STOP ~~~ PSTART
