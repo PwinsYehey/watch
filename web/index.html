@@ -36,7 +36,7 @@
     .dash-level { padding: 10px 12px; border-radius: 4px; background: #00c800; color: #fff; }
     .dash-level-name { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
     .dash-level-timer { font-size: 12px; opacity: 0.85; min-height: 15px; }
-    .dash-rows { display: grid; grid-template-columns: 10px 64px 1fr auto; gap: 7px 8px; align-items: center; }
+    .dash-rows { display: grid; grid-template-columns: 10px 76px 1fr auto; gap: 7px 8px; align-items: center; }
     .dot { width: 10px; height: 10px; border-radius: 50%; }
     .dash-events { list-style: none; padding: 0; margin: 0; font-size: 12px; }
     .dash-events li { margin: 4px 0; }
@@ -78,6 +78,8 @@
       <div class="dash-rows" id="dashSigns"></div>
       <div class="dash-label">Detection</div>
       <div class="dash-rows" id="dashChecks"></div>
+      <div class="dash-label">Calibration</div>
+      <div class="dash-rows" id="dashCalibration"></div>
       <div class="dash-label">Recent events</div>
       <ol class="dash-events" id="dashEvents"></ol>
     </aside>
@@ -104,7 +106,7 @@
   <script src="config.js?v=19"></script>
   <script src="geometry.js?v=16"></script>
   <script src="alertness.js?v=11"></script>
-  <script type="module" src="app.js?v=51"></script>
+  <script type="module" src="app.js?v=52"></script>
 
   <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
 </body>

@@ -17,11 +17,23 @@ GREEN, RED, AMBER, MAGENTA, ORANGE = (0, 200, 0), (0, 0, 220), (255, 200, 0), (2
 YELLOW, GRAY, WHITE, DIM = (0, 215, 255), (120, 120, 120), (255, 255, 255), (150, 150, 150)
 BANNERS = {0: ("NORMAL", GREEN), 1: ("WARNING", YELLOW), 2: ("CRITICAL", RED), "no_face": ("NO FACE DETECTED", GRAY)}
 EYE_CONTOURS = {"left": FACE_MESH.FACEMESH_RIGHT_EYE, "right": FACE_MESH.FACEMESH_LEFT_EYE}
-PANEL_WIDTH = 300
+PANEL_WIDTH, PANEL_HEIGHT = 300, 610
 
 
 def _text(image, text, x, y, color=WHITE, scale=0.45, thickness=1):
     cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def _side_by_side(frame, panel):
+    """Puts the dashboard beside the frame, padding the frame below when the dashboard is taller."""
+    extra = panel.shape[0] - frame.shape[0]
+    if extra > 0:
+        frame = cv2.copyMakeBorder(frame, 0, extra, 0, 0, cv2.BORDER_CONSTANT, value=(24, 24, 24))
+    return np.hstack([frame, panel])
+
+
+def _empty_panel(height):
+    return np.full((max(height, PANEL_HEIGHT), PANEL_WIDTH, 3), 24, np.uint8)
 
 
 def _level_box(panel, name, color, reason="", timer=""):
@@ -105,6 +117,7 @@ class LiveMonitor:
         self.tracker = FaceTracker()
         self.alarm = Alarm()
         self.events = deque(maxlen=5)
+        self.calibrated = False
         self._reset()
 
     def _reset(self):
@@ -135,13 +148,14 @@ class LiveMonitor:
                     rolls.append(regions.roll)
             for y, text in ((40, "Calibrating, look at the camera normally"), (80, f"{remaining:.1f}s")):
                 cv2.putText(frame, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ORANGE, 2)
-            panel = np.full((frame.shape[0], PANEL_WIDTH, 3), 24, np.uint8)
+            panel = _empty_panel(frame.shape[0])
             _level_box(panel, "CALIBRATING", ORANGE, "look at the camera normally", f"{remaining:.1f}s left")
-            cv2.imshow(WINDOW, np.hstack([frame, panel]))
+            cv2.imshow(WINDOW, _side_by_side(frame, panel))
             cv2.waitKey(1)
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
-        if len(ears) < 10:
+        self.calibrated = len(ears) >= 10
+        if not self.calibrated:
             print("Calibration found no face, using default thresholds.")
         else:
             baseline = statistics.median(ears)
@@ -213,10 +227,11 @@ class LiveMonitor:
             for i in (10, 152):
                 cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
 
-        return np.hstack([frame, self._dashboard(h, regions, cues, escalation, statuses, fps, brightness)])
+        return _side_by_side(frame, self._dashboard(h, regions, cues, escalation, statuses, fps, brightness))
 
     def _dashboard(self, height, regions, cues, escalation, statuses, fps, brightness):
-        panel = np.full((height, PANEL_WIDTH, 3), 24, np.uint8)
+        panel = _empty_panel(height)
+        height = panel.shape[0]
         name, color = BANNERS["no_face" if regions is None and escalation.level == 0 else escalation.level]
         timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
         _level_box(panel, name, color, escalation.reason, timer)
@@ -254,11 +269,24 @@ class LiveMonitor:
             _text(panel, label, 14, y)
             _text(panel, value, 104, y, value_color)
 
-        _text(panel, "RECENT EVENTS", 14, 376, DIM, 0.4)
+        _text(panel, "CALIBRATION", 14, 376, DIM, 0.4)
+        calibration = (
+            ("Status", "personal" if self.calibrated else "default", GREEN if self.calibrated else YELLOW),
+            ("Open eye", f"EAR {self.ear['open_threshold']:.2f}", WHITE),
+            ("Closed eye", f"EAR <= {self.ear['closed_threshold']:.2f}", WHITE),
+            ("Head down", f">= {self.head['drooped_threshold']:.1f} deg", WHITE),
+            ("Head tilt", f">= {self.head['roll_drooped_threshold']:.1f} deg", WHITE),
+        )
+        for i, (label, value, value_color) in enumerate(calibration):
+            y = 398 + 20 * i
+            _text(panel, label, 14, y)
+            _text(panel, value, 124, y, value_color)
+
+        _text(panel, "RECENT EVENTS", 14, 506, DIM, 0.4)
         if not self.events:
-            _text(panel, "none yet", 14, 396, DIM, 0.4)
+            _text(panel, "none yet", 14, 526, DIM, 0.4)
         for i, (stamp, level, reason) in enumerate(reversed(self.events)):
-            if (y := 396 + 18 * i) > height - 6:
+            if (y := 526 + 18 * i) > height - 6:
                 break
             name, color = BANNERS[level]
             _text(panel, f"{stamp} {name} {reason}"[:40], 14, y, color, 0.4)

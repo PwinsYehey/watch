@@ -470,8 +470,8 @@ function setDashLevel(name, color, reason, timer, darkText) {
   document.getElementById("dashLevelTimer").textContent = timer;
 }
 
-function dashRow(color, label, value, extra = "") {
-  return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${color === DOT.gray ? "#888" : color}">${value}</span><span class="dim">${extra}</span>`;
+function dashRow(color, label, value, extra = "", valueColor = color === DOT.gray ? "#888" : color) {
+  return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${valueColor}">${value}</span><span class="dim">${extra}</span>`;
 }
 
 // The graphics chip the browser renders with; laptops often default browsers to the slower built-in one.
@@ -482,16 +482,32 @@ function browserGpu() {
   gl?.getExtension("WEBGL_lose_context")?.loseContext();
   const plain = renderer.replace(/\((R|TM)\)/g, "");
   const name = plain.match(/ANGLE \([^,]+, (.+?)(?: \(0x| Direct3D|,)/)?.[1] || plain || "unknown";
-  const color = /swiftshader|software|unknown/i.test(name) ? DOT.red : /nvidia|geforce|rtx|radeon rx/i.test(name) ? DOT.green : DOT.yellow;
-  return { name: name.length > 22 ? `${name.slice(0, 21)}…` : name, color };
+  const color = /swiftshader|software|basic render|llvmpipe|unknown/i.test(name) ? DOT.red : /nvidia|geforce|rtx|radeon rx/i.test(name) ? DOT.green : DOT.yellow;
+  const short = name.replace(/^NVIDIA /, "").replace(/ Laptop GPU$/, "");
+  return { name: short.length > 18 ? `${short.slice(0, 17)}…` : short, color };
 }
 const gpu = browserGpu();
+
+// Mirrors the calibration section of LiveMonitor._dashboard in src/watch/live.py.
+function showCalibration(calibrated) {
+  const rows = [
+    ["Status", calibrated ? "personal" : "default", calibrated ? DOT.green : DOT.yellow],
+    ["Open eye", `EAR ${earCfg.openThreshold.toFixed(2)}`],
+    ["Closed eye", `EAR ≤ ${earCfg.closedThreshold.toFixed(2)}`],
+    ["Head down", `≥ ${headPoseCfg.droopedThreshold.toFixed(1)}°`],
+    ["Head tilt", `≥ ${headPoseCfg.rollDroopedThreshold.toFixed(1)}°`],
+  ];
+  document.getElementById("dashCalibration").innerHTML = rows
+    .map(([label, value, color]) => (color ? dashRow(color, label, value) : dashRow("transparent", label, value, "", "#eee")))
+    .join("");
+}
 
 function resetDashboard() {
   dashEvents = [];
   dashLastLevel = 0;
   document.getElementById("dashSigns").innerHTML = "";
   document.getElementById("dashChecks").innerHTML = "";
+  document.getElementById("dashCalibration").innerHTML = "";
   document.getElementById("dashEvents").innerHTML = '<li class="dim">none yet</li>';
 }
 
@@ -656,14 +672,9 @@ async function main() {
     );
     if (calibrated) {
       earCfg = calibrated.ear;
-      statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
-      if (calibrated.headPose) {
-        headPoseCfg = calibrated.headPose;
-        statusEl.textContent += ` | head-pose: upright<=${headPoseCfg.uprightThreshold.toFixed(1)}, drooped>=${headPoseCfg.droopedThreshold.toFixed(1)}`;
-      }
-    } else {
-      statusEl.textContent = "Calibration failed (no face detected) -- using default EAR/head-pose thresholds.";
+      if (calibrated.headPose) headPoseCfg = calibrated.headPose;
     }
+    showCalibration(Boolean(calibrated));
     paused = false;
   }
 
