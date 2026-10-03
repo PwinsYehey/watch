@@ -54,7 +54,7 @@ const CONFIG = {
   },
   "escalation": {
     "windowSec": 30.0,
-    "calmSec": 10.0,
+    "calmSec": 5.0,
     "persistSec": {
       "eyes": 3.0,
       "mouth": null,

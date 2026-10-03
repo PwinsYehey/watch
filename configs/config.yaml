@@ -82,7 +82,7 @@ yawn:
 # or the event lasting persist_sec within window_sec makes it critical. Critical clears after calm_sec.
 escalation:
   window_sec: 30.0
-  calm_sec: 10.0
+  calm_sec: 5.0
   persist_sec: {eyes: 3.0, mouth: null, head: 4.0}
   repeat_count: {eyes: 2, mouth: 3, head: 2}
 
