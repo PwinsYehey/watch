@@ -83,7 +83,7 @@ yawn:
 escalation:
   window_sec: 30.0
   calm_sec: 5.0
-  persist_sec: {eyes: 3.0, mouth: null, head: 4.0}
+  persist_sec: {eyes: 1.5, mouth: null, head: 4.0}
   repeat_count: {eyes: 2, mouth: 3, head: 2}
 
 # Head counts as drooped only once it reaches the full drooped angle below.
