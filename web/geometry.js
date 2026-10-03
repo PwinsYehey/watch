@@ -105,3 +105,21 @@ function headPoseFromTransformMatrix(data) {
 
   return { pitch, roll };
 }
+
+// Mirrors shoulders and body_slump in src/watch/body.py.
+const LEFT_SHOULDER = 11, RIGHT_SHOULDER = 12;
+
+function shouldersFromPose(landmarks, w, h, minVisibility) {
+  const left = landmarks[LEFT_SHOULDER], right = landmarks[RIGHT_SHOULDER];
+  if (Math.min(left.visibility ?? 0, right.visibility ?? 0) < minVisibility) return null;
+  const lx = left.x * w, ly = left.y * h, rx = right.x * w, ry = right.y * h;
+  const width = Math.hypot(lx - rx, ly - ry);
+  if (width < 1) return null;
+  return { centerX: (lx + rx) / 2, centerY: (ly + ry) / 2, width, tilt: (Math.atan2(ry - ly, Math.abs(rx - lx)) * 180) / Math.PI, left: { x: lx, y: ly }, right: { x: rx, y: ry } };
+}
+
+function bodySlump(pose, baseline, cfg) {
+  const drop = Math.max(0, (pose.centerY - baseline.centerY) / baseline.width);
+  const lean = Math.abs(pose.tilt - baseline.tilt);
+  return { score: Math.min(1, Math.max(drop / cfg.dropLimit, lean / cfg.leanLimitDeg)), drop, lean };
+}

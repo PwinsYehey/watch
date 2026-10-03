@@ -43,7 +43,8 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 4. One sign gives a warning and starts a 30 s watch. It turns critical if the sign repeats, another sign appears, or it lasts (eyes closed 3 s, head drooped 4 s). Three yawns are needed on their own.
 5. Critical drops back to a warning after 5 s without signs. If the face leaves the view, the level is held; when the face comes back after 3 s or more, it recalibrates and starts again from normal.
 6. The dashboard beside the video shows the alert level, each sign with its timer, what is being detected, and recent level changes.
-7. Export saves the session so far as a PNG report with graphs of the alert level, eyes, mouth and head, plus a CSV of the readings (`E` in the live monitor, saved to `results/sessions/`; the Export button in the web demo).
+7. The shoulders are tracked too: calibration measures the sitting posture, and the dashboard shows a Body sign, whether a person is in view, and how far the shoulders have dropped or leaned. This is display only for now and does not raise alerts.
+8. Export saves the session so far as a PNG report with graphs of the alert level, eyes, mouth and head, plus a CSV of the readings (`E` in the live monitor, saved to `results/sessions/`; the Export button in the web demo).
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
 

@@ -1,5 +1,5 @@
 // Browser port of src/watch/live.py using MediaPipe Tasks Vision and TensorFlow.js.
-import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { FaceLandmarker, FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 480;
@@ -184,6 +184,7 @@ const OPEN_COLOR = "#00c800";
 const CLOSED_COLOR = "#dc0000";
 const MOUTH_COLOR = "#ffc800";
 const HEAD_COLOR = "#ff00c8";
+const BODY_COLOR = "#ff8c00";
 const BANNER_COLORS = { alert: "#00c800", not_alert: "#dc0000", no_face: "#ffa500" };
 const BANNER_TEXT = { alert: "ALERT", not_alert: "NOT ALERT", no_face: "NO FACE DETECTED" };
 // Mirrors BANNERS in src/watch/live.py.
@@ -299,6 +300,56 @@ async function predictRegions(regions, eyeModel, yawnModel) {
 
 let earCfg = CONFIG.ear;
 let headPoseCfg = CONFIG.headPose;
+let bodyBase = null;
+
+// Mirrors BodyTracker in src/watch/body.py: posture changes slowly, so the pose model runs every few frames.
+function makeBodyTracker(poseLandmarker) {
+  let frame = 0, last = null;
+  return (source) => {
+    frame += 1;
+    if (CONFIG.body.everyNFrames === 1 || frame % CONFIG.body.everyNFrames === 1) {
+      const result = poseLandmarker.detectForVideo(source, performance.now());
+      last = result.landmarks.length ? shouldersFromPose(result.landmarks[0], source.width, source.height, CONFIG.body.minVisibility) : null;
+    }
+    return last;
+  };
+}
+
+// Mirrors LiveMonitor._body: shown on the dashboard only, not used for alerts yet.
+function bodyStatus(pose) {
+  if (!pose) return null;
+  if (!bodyBase) return { label: "upright", score: 0, drop: null, lean: null };
+  const { score, drop, lean } = bodySlump(pose, bodyBase, CONFIG.body);
+  return { label: score >= 1 ? "slumped" : "upright", score, drop, lean, pose };
+}
+
+// Mirrors the body marker in LiveMonitor._draw: the shoulder line, over a dashed line at the calibrated shoulder height.
+function drawBody(body) {
+  if (!body?.pose) return;
+  const { pose } = body;
+  if (bodyBase) {
+    ctx.strokeStyle = "rgba(150, 150, 150, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(pose.centerX - pose.width / 2, bodyBase.centerY);
+    ctx.lineTo(pose.centerX + pose.width / 2, bodyBase.centerY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const color = body.label === "slumped" ? CLOSED_COLOR : BODY_COLOR;
+  ctx.strokeStyle = ctx.fillStyle = color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(pose.left.x, pose.left.y);
+  ctx.lineTo(pose.right.x, pose.right.y);
+  ctx.stroke();
+  for (const p of [pose.left, pose.right]) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
 
 let modelsPromise = null;
 function ensureModels() {
@@ -333,7 +384,22 @@ function ensureModels() {
         minTrackingConfidence: CONFIG.live.faceTrackingConfidence,
       });
 
-      return { eyeModel, yawnModel, faceLandmarker, vision, baseOptions };
+      const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numPoses: 1,
+      });
+
+      // The first run of each tracker sets up its GPU shaders and can take seconds, so do it now rather than during calibration.
+      const warmUp = document.createElement("canvas");
+      warmUp.width = warmUp.height = 64;
+      faceLandmarker.detectForVideo(warmUp, performance.now());
+      poseLandmarker.detectForVideo(warmUp, performance.now());
+
+      return { eyeModel, yawnModel, faceLandmarker, poseLandmarker, vision, baseOptions };
     })();
   }
   return modelsPromise;
@@ -498,6 +564,7 @@ function showCalibration(calibrated) {
     ["Closed eye", `EAR ≤ ${earCfg.closedThreshold.toFixed(2)}`],
     ["Head down", `≥ ${headPoseCfg.droopedThreshold.toFixed(1)}°`],
     ["Head tilt", `≥ ${headPoseCfg.rollDroopedThreshold.toFixed(1)}°`],
+    ["Body", bodyBase ? "measured" : "not seen"],
   ];
   document.getElementById("dashCalibration").innerHTML = rows
     .map(([label, value, color]) => (color ? dashRow(color, label, value) : dashRow("transparent", label, value, "", "#eee")))
@@ -533,7 +600,7 @@ function resetDashboard() {
 }
 
 // Mirrors LiveMonitor._dashboard in src/watch/live.py.
-function updateDashboard({ escalation, faceFound, left, right, mouth, head, statuses, fps, brightness }) {
+function updateDashboard({ escalation, faceFound, left, right, mouth, head, body, statuses, fps, brightness }) {
   if (escalation.level !== dashLastLevel) {
     dashLastLevel = escalation.level;
     dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
@@ -558,11 +625,13 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
       const color = !state ? DOT.gray : status.state === "not_alert" ? DOT.red : state === concerning ? DOT.yellow : DOT.green;
       return dashRow(color, label, state || "not visible", `${status.closedDuration.toFixed(1)}s`);
     })
-    .join("");
+    .join("")
+    + dashRow(!body ? DOT.gray : body.label === "slumped" ? DOT.yellow : DOT.green, "Body", body ? body.label : "not visible");
 
   const dark = brightness < CONFIG.live.lowLightMean;
   const checks = [
     ["Face", faceFound ? "found" : "not found", faceFound ? DOT.green : DOT.red],
+    ["Person", body ? "in view" : "shoulders not seen", body ? DOT.green : DOT.yellow],
     ["Eyes", faceFound ? `${eyes.length} of 2 readable` : "-", faceFound ? [DOT.red, DOT.yellow, DOT.green][eyes.length] : DOT.gray],
     ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
     ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
@@ -579,6 +648,8 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
     ["Mouth (MAR)", mouth ? mouth.mar.toFixed(2) : "-", mouth?.label === "yawn"],
     ["Head down", head ? `${head.pitch.toFixed(1)}°` : "-", head && head.pitch >= headPoseCfg.droopedThreshold],
     ["Head tilt", head ? `${head.roll.toFixed(1)}°` : "-", head && head.roll >= headPoseCfg.rollDroopedThreshold],
+    ["Body drop", body?.drop != null ? `${Math.round(body.drop * 100)}%` : "-", body?.drop != null && body.drop >= CONFIG.body.dropLimit],
+    ["Body lean", body?.lean != null ? `${body.lean.toFixed(1)}°` : "-", body?.lean != null && body.lean >= CONFIG.body.leanLimitDeg],
   ];
   document.getElementById("dashLive").innerHTML = live
     .map(([label, value, past]) => dashRow("transparent", label, value, "", past ? DOT.red : value === "-" ? "#888" : "#eee"))
@@ -608,16 +679,20 @@ function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   });
 }
 
-async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffset, rollDroopedOffset) {
+async function calibrate(faceLandmarker, trackBody, durationSec, closedOffset, droopedOffset, rollDroopedOffset) {
+  const poses = [];
   const earSamples = [];
   const pitchSamples = [];
   const rollSamples = [];
-  const start = performance.now();
-  while (performance.now() - start < durationSec * 1000) {
+  // The countdown starts after the first processed frame, so a slow start cannot eat into calibration.
+  let start = null;
+  while (start === null || performance.now() - start < durationSec * 1000) {
     updateMirror();
     removeGlare(mirrorCanvas, glareCleanCtx);
     const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
     session.add(Date.now() / 1000, "Calibrating");
+    const pose = trackBody(glareCleanCanvas);
+    if (pose) poses.push(pose);
     ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
@@ -629,6 +704,7 @@ async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffse
         rollSamples.push(headPose.roll);
       }
     }
+    if (start === null) start = performance.now();
     // The countdown lives in the dashboard, matching the live monitor.
     const remaining = Math.max(0, durationSec - (performance.now() - start) / 1000);
     setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${remaining.toFixed(1)}s left`, false);
@@ -636,6 +712,8 @@ async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffse
     await new Promise((r) => requestAnimationFrame(r));
   }
 
+  // The sitting posture the body check compares against, if the shoulders were in view.
+  bodyBase = poses.length >= 5 ? Object.fromEntries(["centerX", "centerY", "width", "tilt"].map((k) => [k, median(poses.map((p) => p[k]))])) : null;
   if (earSamples.length < 10) return null;
   const earBaseline = median(earSamples);
   const result = { ear: { openThreshold: earBaseline, closedThreshold: earBaseline - closedOffset } };
@@ -657,7 +735,8 @@ async function main() {
   originalPanel.hidden = true;
   scannedLabel.hidden = true;
   statusEl.textContent = "Loading models...";
-  const { eyeModel, yawnModel, faceLandmarker, vision, baseOptions } = await ensureModels();
+  const { eyeModel, yawnModel, faceLandmarker, poseLandmarker, vision, baseOptions } = await ensureModels();
+  const trackBody = makeBodyTracker(poseLandmarker);
   const zoomLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
 
   statusEl.textContent = "Requesting camera...";
@@ -705,7 +784,7 @@ async function main() {
     stopAlarm();
     setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${CONFIG.calibration.durationSec.toFixed(1)}s left`, false);
     const calibrated = await calibrate(
-      faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
+      faceLandmarker, trackBody, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
       CONFIG.calibration.droopedOffset, CONFIG.calibration.rollDroopedOffset,
     );
     if (calibrated) {
@@ -817,6 +896,8 @@ async function main() {
           headDroop = headResult?.droop ?? null;
         }
       }
+      const bodyResult = bodyStatus(trackBody(glareCleanCanvas));
+      drawBody(bodyResult);
       // A frame still in flight when the camera stops must not overwrite the idle dashboard or start the alarm.
       if (!cameraActive) return;
       const now = performance.now() / 1000;
@@ -842,7 +923,7 @@ async function main() {
       const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
       prevTime = now;
       updateDashboard({
-        escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult,
+        escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult, body: bodyResult,
         statuses: { eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, fps, brightness,
       });
 
