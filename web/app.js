@@ -14,6 +14,7 @@ const scannedLabel = document.getElementById("scannedLabel");
 const captureHint = document.getElementById("captureHint");
 const flashOverlay = document.getElementById("flashOverlay");
 const placeholder = document.getElementById("placeholder");
+const dashboard = document.getElementById("dashboard");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -502,6 +503,14 @@ function showCalibration(calibrated) {
     .join("");
 }
 
+// The phone layout shows one of Detection, Calibration or Events at a time.
+for (const tab of document.querySelectorAll(".dash-tabs button")) {
+  tab.addEventListener("click", () => {
+    document.getElementById("dashboard").dataset.tab = tab.dataset.tab;
+    for (const other of document.querySelectorAll(".dash-tabs button")) other.setAttribute("aria-selected", String(other === tab));
+  });
+}
+
 function showIdle() {
   setDashLevel("IDLE", "#2a2f3a", "Start the camera to begin monitoring", "", false);
 }
@@ -520,7 +529,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
   if (escalation.level !== dashLastLevel) {
     dashLastLevel = escalation.level;
     dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
-    dashEvents = dashEvents.slice(0, 5);
+    dashEvents = dashEvents.slice(0, 50);
   }
   if (performance.now() - dashLastDraw < 150) return;
   dashLastDraw = performance.now();
@@ -640,6 +649,7 @@ async function main() {
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
   resetDashboard();
+  dashboard.hidden = false;
   placeholder.hidden = true;
   playStartSound();
   displayCanvas.classList.add("capturable");
@@ -678,11 +688,14 @@ async function main() {
       earCfg = calibrated.ear;
       if (calibrated.headPose) headPoseCfg = calibrated.headPose;
     }
+    // The camera may have been stopped, or a photo captured, while calibrating.
+    if (!cameraActive) return;
     showCalibration(Boolean(calibrated));
     paused = false;
   }
 
   await runCalibration();
+  if (!cameraActive) return;
   muteBtn.hidden = false;
 
   const eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
@@ -768,6 +781,8 @@ async function main() {
           headDroop = headResult?.droop ?? null;
         }
       }
+      // A frame still in flight when the camera stops must not overwrite the idle dashboard or start the alarm.
+      if (!cameraActive) return;
       const now = performance.now() / 1000;
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
@@ -881,6 +896,8 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   originalPanel.hidden = false;
   scannedLabel.hidden = false;
   placeholder.hidden = true;
+  // A photo is not monitored over time, so the dashboard has nothing to show.
+  dashboard.hidden = true;
 
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);

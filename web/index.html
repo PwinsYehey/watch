@@ -25,7 +25,8 @@
     .brand-name { font-size: 15px; font-weight: 700; letter-spacing: 0.14em; }
     .brand-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .layout { --video-width: min(calc((100vh - 176px) * 4 / 3 + 26px), 980px); max-width: 1600px; margin: 16px auto; padding: 0 20px; display: grid; grid-template-columns: minmax(0, var(--video-width)) minmax(300px, 1fr); gap: 16px; align-items: start; }
+    .layout { --video-width: min(calc((100vh - 176px) * 4 / 3 + 26px), 980px); max-width: 1600px; margin: 16px auto; padding: 0 20px; display: grid; grid-template-columns: minmax(0, var(--video-width)) minmax(300px, 1fr); gap: 16px; align-items: stretch; }
+    .layout:has(#dashboard[hidden]) { grid-template-columns: minmax(0, calc((100vh - 200px) * 8 / 3 + 40px)); justify-content: center; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
     .viewer { padding: 12px; }
     .viewer-grid { display: grid; gap: 12px; }
@@ -59,12 +60,17 @@
     .capture-hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
 
     .dashboard { container-type: inline-size; padding: 14px 16px; font-size: 13px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0 24px; }
+    .dashboard[hidden] { display: none; }
     .dash-group { min-width: 0; }
-    .dash-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--border); }
-    .dash-group > .dash-label:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+    .dash-group-events { display: flex; flex-direction: column; }
+    [data-section="events"] { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+    .dash-events-wrap { flex: 1 1 0; height: 0; min-height: 120px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #3a4150 transparent; }
+    .dash-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+    .dash-section + .dash-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
     @container (max-width: 523px) {
-      .dash-group + .dash-group > .dash-label:first-child { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+      .dash-group + .dash-group > .dash-section:first-child { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
     }
+    .dash-tabs { display: none; }
     .dash-level { padding: 10px 12px; border-radius: 8px; background: #2a2f3a; color: #fff; transition: background 0.2s; }
     .dash-level-name { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
     .dash-level-timer { font-size: 12px; opacity: 0.85; min-height: 16px; }
@@ -77,19 +83,49 @@
 
     footer { display: none; padding: 0 16px 20px; text-align: center; font-size: 12px; color: #5b6270; }
 
+    @media (min-width: 561px) and (max-height: 720px) {
+      .dash-rows { gap: 2px 8px; }
+      .dash-section + .dash-section { margin-top: 10px; padding-top: 8px; }
+      .dash-level { padding: 8px 12px; }
+    }
     @media (max-width: 900px) {
-      .layout { grid-template-columns: 1fr; }
+      .layout, .layout:has(#dashboard[hidden]) { grid-template-columns: 1fr; }
       .credits { display: none; }
       footer { display: block; }
     }
     @media (max-width: 560px) {
-      .app-header { padding: 10px 16px; }
+      .app-header { padding: 8px 14px; }
       .brand-sub { display: none; }
-      .layout { margin: 12px auto; padding: 0 12px; gap: 12px; }
-      .viewer { padding: 10px; }
+      .layout { margin: 8px auto; padding: 0 8px; gap: 8px; }
+      .viewer { padding: 8px; }
       .viewer-grid:has(#originalPanel:not([hidden])) { grid-template-columns: 1fr; }
-      .controls .btn { flex: 1 1 auto; }
-      .controls .hint { margin-left: 0; width: 100%; text-align: center; }
+      .controls { flex-wrap: nowrap; gap: 6px; margin-top: 8px; }
+      .controls .btn { flex: 1 1 0; min-width: 0; padding: 0 6px; font-size: 13px; white-space: nowrap; }
+      .controls svg.btn-icon { display: none; }
+      .controls .hint, .capture-hint, #dashboard .dash-label { display: none; }
+      canvas { max-height: 30vh; max-height: clamp(120px, calc(100dvh - 470px), 40vh); object-fit: contain; }
+
+      .dashboard { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+      .dashboard[hidden] { display: none; }
+      .dash-rows { gap: 3px 8px; }
+      .dash-events li { margin: 2px 0; }
+      [data-section="events"] { flex: none; }
+      .dash-events-wrap { flex: none; height: auto; min-height: 0; max-height: 128px; }
+      .dash-group { display: contents; }
+      .dash-section + .dash-section, .dash-group + .dash-group > .dash-section:first-child { margin: 0; padding: 0; border: 0; }
+      .dash-level { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 8px 12px; }
+      .dash-level-name { font-size: 16px; }
+      .dash-level-timer { margin-left: auto; min-height: 0; }
+      [data-section="level"] { order: 1; }
+      [data-section="signs"] { order: 2; }
+      .dash-tabs { order: 3; display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: var(--surface-2); }
+      .dash-tabs button { flex: 1; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+      .dash-tabs button[aria-selected="true"] { background: #2b3140; color: var(--text); }
+      .dash-tab { order: 4; display: none; }
+      #dashboard[data-tab="detection"] [data-section="detection"],
+      #dashboard[data-tab="calibration"] [data-section="calibration"],
+      #dashboard[data-tab="events"] [data-section="events"] { display: flex; }
+      footer { display: none; }
     }
   </style>
 </head>
@@ -145,24 +181,39 @@
       <div id="status"></div>
     </section>
 
-    <aside class="card dashboard" id="dashboard">
+    <aside class="card dashboard" id="dashboard" data-tab="detection">
       <div class="dash-group">
-        <div class="dash-label">Alert level</div>
-        <div class="dash-level" id="dashLevel">
-          <div class="dash-level-name" id="dashLevelName">IDLE</div>
-          <div id="dashLevelReason">Start the camera to begin monitoring</div>
-          <div class="dash-level-timer" id="dashLevelTimer"></div>
-        </div>
-        <div class="dash-label">Signs</div>
-        <div class="dash-rows" id="dashSigns"></div>
-        <div class="dash-label">Recent events</div>
-        <ol class="dash-events" id="dashEvents"><li class="dim">none yet</li></ol>
+        <section class="dash-section" data-section="level">
+          <div class="dash-label">Alert level</div>
+          <div class="dash-level" id="dashLevel">
+            <div class="dash-level-name" id="dashLevelName">IDLE</div>
+            <div id="dashLevelReason">Start the camera to begin monitoring</div>
+            <div class="dash-level-timer" id="dashLevelTimer"></div>
+          </div>
+        </section>
+        <section class="dash-section" data-section="signs">
+          <div class="dash-label">Signs</div>
+          <div class="dash-rows" id="dashSigns"></div>
+        </section>
+        <section class="dash-section dash-tab" data-section="detection">
+          <div class="dash-label">Detection</div>
+          <div class="dash-rows" id="dashChecks"></div>
+        </section>
+        <section class="dash-section dash-tab" data-section="calibration">
+          <div class="dash-label">Calibration</div>
+          <div class="dash-rows" id="dashCalibration"></div>
+        </section>
       </div>
-      <div class="dash-group">
-        <div class="dash-label">Detection</div>
-        <div class="dash-rows" id="dashChecks"></div>
-        <div class="dash-label">Calibration</div>
-        <div class="dash-rows" id="dashCalibration"></div>
+      <div class="dash-group dash-group-events">
+        <section class="dash-section dash-tab" data-section="events">
+          <div class="dash-label">Recent events</div>
+          <div class="dash-events-wrap"><ol class="dash-events" id="dashEvents"><li class="dim">none yet</li></ol></div>
+        </section>
+      </div>
+      <div class="dash-tabs" role="tablist">
+        <button role="tab" data-tab="detection" aria-selected="true">Detection</button>
+        <button role="tab" data-tab="calibration" aria-selected="false">Calibration</button>
+        <button role="tab" data-tab="events" aria-selected="false">Events</button>
       </div>
     </aside>
   </main>
@@ -175,6 +226,6 @@
   <script src="config.js?v=19"></script>
   <script src="geometry.js?v=16"></script>
   <script src="alertness.js?v=11"></script>
-  <script type="module" src="app.js?v=53"></script>
+  <script type="module" src="app.js?v=56"></script>
 </body>
 </html>
