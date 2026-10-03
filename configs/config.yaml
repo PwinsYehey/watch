@@ -88,7 +88,7 @@ escalation:
 
 # Head counts as drooped only once it reaches the full drooped angle below.
 nod:
-  closed_duration_threshold_sec: 2.0
+  closed_duration_threshold_sec: 1.5
   perclos_window_sec: 6.0
   perclos_threshold: 0.9
   closedness_threshold: 1.0

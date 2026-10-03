@@ -26,7 +26,7 @@ const CONFIG = {
     "dipGracePeriodSec": 0.5
   },
   "nod": {
-    "closedDurationThresholdSec": 2.0,
+    "closedDurationThresholdSec": 1.5,
     "perclosWindowSec": 6.0,
     "perclosThreshold": 0.9,
     "closednessThreshold": 1.0,
