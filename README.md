@@ -38,8 +38,10 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 ## Live monitor
 
 1. Calibration takes 4 seconds: look at the camera normally.
-2. The banner shows **ALERT**, **NOT ALERT** or **NO FACE DETECTED**, and an alarm beeps while not alert.
-3. Not alert means eyes closed for 1.5 s, a yawn held for 3 s, or the head drooped for 2 s, or a high average of any of these over a short window.
+2. The banner shows **NORMAL**, **WARNING**, **CRITICAL** or **NO FACE DETECTED**, and an alarm beeps while critical.
+3. A sign of drowsiness is eyes closed for 1.5 s, a yawn held for 2 s, or the head drooped for 2 s, or a high average of any of these over a short window.
+4. One sign gives a warning and starts a 30 s watch. It turns critical if the sign repeats, another sign appears, or it lasts (eyes closed 3 s, head drooped 4 s). Three yawns are needed on their own.
+5. Critical drops back to a warning after 5 s without signs. If the face leaves the view, the current level is held.
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
 

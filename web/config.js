@@ -19,7 +19,7 @@ const CONFIG = {
     "closednessThreshold": 0.85
   },
   "yawn": {
-    "closedDurationThresholdSec": 3.0,
+    "closedDurationThresholdSec": 2.0,
     "perclosWindowSec": 8.0,
     "perclosThreshold": 0.8,
     "closednessThreshold": 0.5,
@@ -51,6 +51,20 @@ const CONFIG = {
     "closedOffset": 0.1,
     "droopedOffset": 25.0,
     "rollDroopedOffset": 25.0
+  },
+  "escalation": {
+    "windowSec": 30.0,
+    "calmSec": 5.0,
+    "persistSec": {
+      "eyes": 3.0,
+      "mouth": null,
+      "head": 4.0
+    },
+    "repeatCount": {
+      "eyes": 2,
+      "mouth": 3,
+      "head": 2
+    }
   },
   "live": {
     "minCnnConfidence": 0.65,

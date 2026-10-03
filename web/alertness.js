@@ -63,3 +63,90 @@ class AlertnessMonitor {
     return this.history.reduce((sum, h) => sum + h.score, 0) / this.history.length;
   }
 }
+
+const CUE_LABELS = { eyes: "eyes closed", mouth: "yawning", head: "head drooped" };
+
+// Mirrors EscalationMonitor in src/watch/alertness.py.
+class EscalationMonitor {
+  constructor({ windowSec, calmSec, persistSec, repeatCount }) {
+    this.window = windowSec;
+    this.calm = calmSec;
+    this.persist = persistSec;
+    this.repeat = repeatCount;
+    this.level = 0;
+    this.reason = "";
+    this.events = [];
+    this.active = {};
+    this.windowEnd = 0.0;
+    this.calmSince = null;
+    this.last = null;
+  }
+
+  update(statuses, facePresent, now) {
+    const elapsed = this.last !== null ? now - this.last : 0.0;
+    this.last = now;
+    if (!facePresent) {
+      this.windowEnd += elapsed;
+      this.calmSince = null;
+      return this._status(now);
+    }
+
+    const concerning = Object.keys(statuses).filter((cue) => statuses[cue].state === "not_alert");
+    const newEvents = concerning.filter((cue) => !this.active[cue]);
+    for (const [cue, status] of Object.entries(statuses)) {
+      if (status.state !== "no_face") this.active[cue] = status.state === "not_alert";
+    }
+    this.events.push(...newEvents);
+
+    if (this.level === 2) {
+      if (concerning.length) this.calmSince = null;
+      else if (this.calmSince === null) this.calmSince = now;
+      else if (now - this.calmSince >= this.calm) {
+        this.level = 1;
+        this.reason = "recovering";
+        this.windowEnd = now + this.window;
+      }
+      return this._status(now);
+    }
+
+    if (newEvents.length) {
+      this.windowEnd = now + this.window;
+      if (this.level === 0) {
+        this.level = 1;
+        this.reason = newEvents.map((cue) => CUE_LABELS[cue]).join(" + ");
+      }
+      const reason = this._repeatedOrCombined();
+      if (reason) return this._critical(reason, now);
+    }
+    if (this.level === 1) {
+      for (const cue of concerning) {
+        if (this.persist[cue] !== null && statuses[cue].closedDuration >= this.persist[cue]) return this._critical(`${CUE_LABELS[cue]} too long`, now);
+      }
+      if (!concerning.length && now >= this.windowEnd) {
+        this.level = 0;
+        this.reason = "";
+        this.events = [];
+      }
+    }
+    return this._status(now);
+  }
+
+  _repeatedOrCombined() {
+    const cues = Object.keys(CUE_LABELS).filter((cue) => this.events.includes(cue));
+    if (cues.length > 1) return cues.map((cue) => CUE_LABELS[cue]).join(" + ");
+    const cue = cues[0];
+    return this.events.filter((e) => e === cue).length >= this.repeat[cue] ? `${CUE_LABELS[cue]} again` : "";
+  }
+
+  _critical(reason, now) {
+    this.level = 2;
+    this.reason = reason;
+    this.calmSince = null;
+    return this._status(now);
+  }
+
+  _status(now) {
+    const windowLeft = this.level === 1 ? Math.max(0.0, this.windowEnd - now) : 0.0;
+    return { level: this.level, reason: this.reason, windowLeft };
+  }
+}
