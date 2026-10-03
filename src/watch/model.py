@@ -68,14 +68,26 @@ class Classifier:
         self.positive_index = self.class_names.index(spec["positive_class"])
         self.grayscale = spec["grayscale"]
         self.image_size = tuple(config["image_size"])
+        # Compiled once, which avoids most of the per-call overhead of running the Keras model eagerly.
+        self._infer = tf.function(lambda x: self.model(x, training=False), input_signature=[tf.TensorSpec([None, *self.image_size, 3], tf.float32)])
 
-    def predict(self, crop_bgr: np.ndarray) -> tuple[str, float, float]:
-        """Returns (label, confidence, positive-class probability)."""
+    def _prepare(self, crop_bgr: np.ndarray) -> np.ndarray:
         image = cv2.resize(crop_bgr, self.image_size)
         if self.grayscale:
             image = cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2RGB)
         else:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        probabilities = self.model(image[np.newaxis].astype(np.float32) / 255.0, training=False)[0].numpy()
-        index = int(np.argmax(probabilities))
-        return self.class_names[index], float(probabilities[index]), float(probabilities[self.positive_index])
+        return image.astype(np.float32) / 255.0
+
+    def predict(self, crop_bgr: np.ndarray) -> tuple[str, float, float]:
+        """Returns (label, confidence, positive-class probability)."""
+        return self.predict_many([crop_bgr])[0]
+
+    def predict_many(self, crops_bgr: list[np.ndarray]) -> list[tuple[str, float, float]]:
+        """Like predict, for several crops in one batch."""
+        probabilities = self._infer(np.stack([self._prepare(crop) for crop in crops_bgr])).numpy()
+        results = []
+        for row in probabilities:
+            index = int(np.argmax(row))
+            results.append((self.class_names[index], float(row[index]), float(row[self.positive_index])))
+        return results

@@ -38,12 +38,26 @@ def _glare_mask(image: np.ndarray) -> np.ndarray:
     return (hsv[:, :, 2] > 235) & (hsv[:, :, 1] < 60)
 
 
-def remove_glare(image: np.ndarray) -> np.ndarray:
-    """Inpaints bright washed-out highlights such as visor reflections before landmark tracking."""
-    mask = _glare_mask(image).astype(np.uint8) * 255
+def remove_glare(image: np.ndarray, box=None) -> np.ndarray:
+    """Inpaints bright washed-out highlights such as visor reflections before landmark tracking, only inside box when given."""
+    x0, y0, x1, y1 = box or (0, 0, image.shape[1], image.shape[0])
+    region = image[y0:y1, x0:x1]
+    mask = _glare_mask(region).astype(np.uint8) * 255
     if not mask.any():
         return image
-    return cv2.inpaint(image, cv2.dilate(mask, np.ones((3, 3), np.uint8)), 3, cv2.INPAINT_TELEA)
+    cleaned = image.copy()
+    cleaned[y0:y1, x0:x1] = cv2.inpaint(region, cv2.dilate(mask, np.ones((3, 3), np.uint8)), 3, cv2.INPAINT_TELEA)
+    return cleaned
+
+
+def face_box(regions, shape, margin: float = 0.3):
+    """Landmark bounds grown by margin, where glare matters on the next frame."""
+    h, w = shape[:2]
+    xs = [p.x * w for p in regions.landmarks]
+    ys = [p.y * h for p in regions.landmarks]
+    pad_x, pad_y = (max(xs) - min(xs)) * margin, (max(ys) - min(ys)) * margin
+    box = (max(int(min(xs) - pad_x), 0), max(int(min(ys) - pad_y), 0), min(int(max(xs) + pad_x), w), min(int(max(ys) + pad_y), h))
+    return box if box[2] > box[0] and box[3] > box[1] else None
 
 
 def glare_fraction(image: np.ndarray, box) -> float:
@@ -143,8 +157,8 @@ class LiveMonitor:
         print(f"Thresholds: EAR closed<={self.ear['closed_threshold']:.2f}, pitch drooped>={self.head['drooped_threshold']:.1f}")
         self._reset()
 
-    def _eye(self, frame, side, eye):
-        _, confidence, cnn_closed = self.eye_model.predict(eye.crop)
+    def _eye(self, frame, side, eye, prediction):
+        _, confidence, cnn_closed = prediction
         if confidence < self.settings["min_cnn_confidence"]:
             return None
         ear_closed = eye.ratio <= self.ear["closed_threshold"] and glare_fraction(frame, eye.box) < self.settings["ear_glare_tolerance"]
@@ -252,10 +266,12 @@ class LiveMonitor:
 
     def run(self):
         self.calibrate()
-        no_face_since, previous = None, time.time()
+        no_face_since, previous, glare_box = None, time.time(), None
         try:
             while (frame := self._read()) is not None:
-                regions = self.tracker.extract(remove_glare(frame))
+                # Only glare on the face matters, so skip bright spots elsewhere such as windows.
+                regions = self.tracker.extract(remove_glare(frame, glare_box))
+                glare_box = face_box(regions, frame.shape) if regions else None
                 if regions is None:
                     no_face_since = no_face_since or time.time()
                 elif no_face_since is not None:
@@ -267,7 +283,8 @@ class LiveMonitor:
 
                 cues = {}
                 if regions:
-                    cues = {side: self._eye(frame, side, eye) for side, eye in regions.eyes.items()}
+                    predictions = self.eye_model.predict_many([eye.crop for eye in regions.eyes.values()]) if regions.eyes else []
+                    cues = {side: self._eye(frame, side, eye, prediction) for (side, eye), prediction in zip(regions.eyes.items(), predictions)}
                     cues["mouth"] = self._mouth(regions.mouth) if regions.mouth else None
                     cues["head"] = self._head(regions.pitch, regions.roll)
                 # The eye nearer the camera looks wider, so it counts more.
