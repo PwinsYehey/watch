@@ -474,6 +474,19 @@ function dashRow(color, label, value, extra = "") {
   return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${color === DOT.gray ? "#888" : color}">${value}</span><span class="dim">${extra}</span>`;
 }
 
+// The graphics chip the browser renders with; laptops often default browsers to the slower built-in one.
+function browserGpu() {
+  const gl = document.createElement("canvas").getContext("webgl");
+  const info = gl && gl.getExtension("WEBGL_debug_renderer_info");
+  const renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : "";
+  gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  const plain = renderer.replace(/\((R|TM)\)/g, "");
+  const name = plain.match(/ANGLE \([^,]+, (.+?)(?: \(0x| Direct3D|,)/)?.[1] || plain || "unknown";
+  const color = /swiftshader|software|unknown/i.test(name) ? DOT.red : /nvidia|geforce|rtx|radeon rx/i.test(name) ? DOT.green : DOT.yellow;
+  return { name: name.length > 22 ? `${name.slice(0, 21)}…` : name, color };
+}
+const gpu = browserGpu();
+
 function resetDashboard() {
   dashEvents = [];
   dashLastLevel = 0;
@@ -517,6 +530,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
     ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
     ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
     ["FPS", fps.toFixed(0), fps >= 15 ? DOT.green : DOT.yellow],
+    ["GPU", gpu.name, gpu.color],
   ];
   document.getElementById("dashChecks").innerHTML = checks.map(([label, value, color]) => dashRow(color, label, value)).join("");
 
