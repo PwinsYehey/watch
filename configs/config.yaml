@@ -99,14 +99,14 @@ head_pose:
   upright_threshold: 8
   drooped_threshold: 33
   roll_upright_threshold: 5
-  roll_drooped_threshold: 45
+  roll_drooped_threshold: 30
 
 # Drooped offsets are degrees past the user's resting pose: clearly looking down, or head near the shoulder.
 calibration:
   duration_sec: 4.0
   closed_offset: 0.10
   drooped_offset: 25.0
-  roll_drooped_offset: 40.0
+  roll_drooped_offset: 25.0
 
 live:
   min_cnn_confidence: 0.65

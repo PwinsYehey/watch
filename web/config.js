@@ -44,13 +44,13 @@ const CONFIG = {
     "uprightThreshold": 8,
     "droopedThreshold": 33,
     "rollUprightThreshold": 5,
-    "rollDroopedThreshold": 45
+    "rollDroopedThreshold": 30
   },
   "calibration": {
     "durationSec": 4.0,
     "closedOffset": 0.1,
     "droopedOffset": 25.0,
-    "rollDroopedOffset": 40.0
+    "rollDroopedOffset": 25.0
   },
   "live": {
     "minCnnConfidence": 0.65,
