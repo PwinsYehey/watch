@@ -1,4 +1,4 @@
-// Ports src/frames/inference/alertness.py -- keep behavior identical.
+// Browser port of src/watch/alertness.py, keep behaviour identical.
 
 class RollingMedian {
   constructor(size) {
@@ -28,7 +28,6 @@ class AlertnessMonitor {
     this.history = []; // [{t, score}]
   }
 
-  // closedness is P(closed) in [0, 1], or null when no face was detected this frame
   update(closedness, now) {
     if (closedness === null) {
       return { state: "no_face", closedDuration: 0.0, perclos: this._perclos(now) };
@@ -39,7 +38,6 @@ class AlertnessMonitor {
       this.belowSince = null;
       if (this.closedSince === null) this.closedSince = now;
     } else {
-      // a brief dip below threshold doesn't reset the streak until it outlasts dipGracePeriod
       if (this.belowSince === null) this.belowSince = now;
       if (now - this.belowSince > this.dipGracePeriod) this.closedSince = null;
     }
@@ -49,7 +47,6 @@ class AlertnessMonitor {
 
     const closedDuration = this.closedSince !== null ? now - this.closedSince : 0.0;
     const perclos = this._perclos(now);
-    // only trust PERCLOS once the rolling window has actually filled
     const windowFilled = now - this.history[0].t >= this.perclosWindow;
 
     const isNotAlert = closedDuration >= this.closedDurationThreshold || (windowFilled && perclos >= this.perclosThreshold);
@@ -60,7 +57,6 @@ class AlertnessMonitor {
     while (this.history.length && now - this.history[0].t > this.perclosWindow) this.history.shift();
   }
 
-  // mean closedness over the window -- a continuous average, not a binary closed/open count
   _perclos(now) {
     this._trimHistory(now);
     if (!this.history.length) return 0.0;

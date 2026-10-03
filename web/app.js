@@ -1,8 +1,5 @@
-// Ports src/frames/inference/live_monitor.py to the browser using MediaPipe Tasks Vision + TensorFlow.js.
+// Browser port of src/watch/live.py using MediaPipe Tasks Vision and TensorFlow.js.
 import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
-
-// a real gap this long (not just a blink or a momentary tracking miss) means the driver likely changed
-const NO_FACE_RECALIBRATE_GAP_MS = 3000;
 
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 480;
@@ -30,14 +27,13 @@ function updateMirror() {
   mirrorCtx.restore();
 }
 
-// tracking/CNN-input-only copy of the frame with glare smoothed out -- the displayed video (mirrorCanvas/canvas) stays untouched
+// Glare-cleaned copy of the frame used only for tracking and model input.
 const glareCleanCanvas = document.createElement("canvas");
 const glareCleanCtx = glareCleanCanvas.getContext("2d", { willReadFrequently: true });
 const glareBlurCanvas = document.createElement("canvas");
 const glareBlurCtx = glareBlurCanvas.getContext("2d");
 
-// mirrors _remove_glare in live_monitor.py -- smooths out bright, washed-out specular highlights (e.g. visor glare)
-// before landmark tracking; no OpenCV inpaint available in-browser, so a blurred copy stands in for the reconstructed pixels
+// Replaces glare pixels with a blurred copy, standing in for the OpenCV inpaint used in live.py.
 function removeGlare(sourceCanvas, targetCtx) {
   const w = sourceCanvas.width, h = sourceCanvas.height;
   targetCtx.canvas.width = w;
@@ -66,15 +62,12 @@ function removeGlare(sourceCanvas, targetCtx) {
   targetCtx.putImageData(sharp, 0, 0);
 }
 
-// glare is bright and washed-out (low saturation), unlike genuine skin/eye color
 function isGlarePixel(r, g, b) {
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   return max > 235 && max - min < 60;
 }
 
-const EAR_GLARE_TOLERANCE = 0.15;
-
-// mirrors _glare_fraction in live_monitor.py -- fraction of a box on the ORIGINAL uncleaned frame that was glare
+// Fraction of a box on the original frame that is glare.
 function glareFraction(box) {
   const x = Math.max(0, Math.floor(box.xMin));
   const y = Math.max(0, Math.floor(box.yMin));
@@ -89,10 +82,7 @@ function glareFraction(box) {
   return glareCount / (data.length / 4);
 }
 
-const LOW_DETAIL_STD_THRESHOLD = 12.0;
-
-// mirrors _is_low_detail in facemesh.py -- true if a box is too flat/featureless to be real facial
-// detail (e.g. a solid patch of opaque tinted visor), checked on the crop the model would actually see
+// True if a box is too flat to be real facial detail, such as an opaque visor.
 function isLowDetail(box) {
   const x = Math.max(0, Math.floor(box.xMin));
   const y = Math.max(0, Math.floor(box.yMin));
@@ -104,7 +94,6 @@ function isLowDetail(box) {
   const grays = new Float64Array(n);
   let sum = 0;
   for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    // matches cv2.cvtColor's BGR2GRAY luma weights
     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
     grays[j] = gray;
     sum += gray;
@@ -112,7 +101,7 @@ function isLowDetail(box) {
   const mean = sum / n;
   let variance = 0;
   for (let j = 0; j < n; j++) variance += (grays[j] - mean) ** 2;
-  return Math.sqrt(variance / n) < LOW_DETAIL_STD_THRESHOLD;
+  return Math.sqrt(variance / n) < CONFIG.live.lowDetailStd;
 }
 
 const statusEl = document.getElementById("status");
@@ -146,7 +135,7 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// a loud pulsing siren tone, started on NOT ALERT and stopped as soon as it clears
+// Pulsing alarm tone that plays while the state is NOT ALERT.
 let audioCtx = null;
 let alarmOscillator = null;
 let alarmGain = null;
@@ -184,20 +173,17 @@ function stopAlarm() {
   }
 }
 
-// tiny offscreen canvas reused for every crop -> model-input resize, avoids per-frame allocation
 const cropCanvas = document.createElement("canvas");
 cropCanvas.width = CONFIG.imageSize[0];
 cropCanvas.height = CONFIG.imageSize[1];
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
 
-// mirrors _predict_class_state in predict.py
+// Mirrors Classifier.predict in src/watch/model.py.
 async function predictClassState(model, sourceCanvas, box, classNames, positiveClass, desaturate = false) {
   cropCtx.drawImage(sourceCanvas, box.xMin, box.yMin, box.xMax - box.xMin, box.yMax - box.yMin, 0, 0, cropCanvas.width, cropCanvas.height);
-  // .data() is async and non-blocking; dataSync() stalls the main thread waiting on the GPU every call
   const predictionTensor = tf.tidy(() => {
     let input = tf.browser.fromPixels(cropCanvas).toFloat();
     if (desaturate) {
-      // matches cv2.cvtColor(..., COLOR_BGR2GRAY)'s luma weights, replicated back to 3 channels
       const [r, g, b] = tf.split(input, 3, 2);
       const gray = r.mul(0.299).add(g.mul(0.587)).add(b.mul(0.114));
       input = tf.concat([gray, gray, gray], 2);
@@ -279,18 +265,13 @@ function ensureBlazeface() {
   return blazefacePromise;
 }
 
-const MIN_CNN_CONFIDENCE = 0.65;
-
 async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
   const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
-  if (cnnConfidence < MIN_CNN_CONFIDENCE) return null;
+  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
-  // a heavily glared eye region corrupts EAR's precise landmark geometry more than the CNN's holistic read,
-  // so a strong glare patch on one side of the eye no longer forces a false "eyes_closed" through the EAR side of the max() below
-  const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < EAR_GLARE_TOLERANCE ? 1.0 : 0.0;
-  // no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
+  // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.
+  const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < CONFIG.live.earGlareTolerance ? 1.0 : 0.0;
   const rawClosedness = Math.max(earClosedness, cnnClosedness);
-  // smoothed per-eye so a single glare-jittered frame under a reflective visor can't flip the on-screen label
   const closedness = smoother ? smoother.add(rawClosedness) : rawClosedness;
   const label = closedness >= 0.5 ? "eyes_closed" : "eyes_opened";
 
@@ -301,12 +282,9 @@ async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
 
 async function drawMouth(box, mar, model, landmarks) {
   const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.yawnClassNames, "yawn");
-  // the yawn CNN has never seen a hand covering the mouth, so a low-confidence prediction is a sign
-  // this isn't really a mouth at all -- e.g. MediaPipe still guessed a plausible-looking box over a hand
-  if (cnnConfidence < MIN_CNN_CONFIDENCE) return null;
+  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
-  // either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
   const openness = Math.max(cnnOpenness, marOpenness);
   const label = openness >= 0.5 ? "yawn" : "no yawn";
 
@@ -318,7 +296,6 @@ function headPoseStatus(pitch, roll, landmarks) {
   if (pitch === null || roll === null) return null;
   const pitchDroop = linearScore(pitch, headPoseCfg.uprightThreshold, headPoseCfg.droopedThreshold);
   const rollDroop = linearScore(roll, headPoseCfg.rollUprightThreshold, headPoseCfg.rollDroopedThreshold);
-  // either a forward nod or a sideways tilt toward the shoulder counts as drooping
   const droop = Math.max(pitchDroop, rollDroop);
   const label = droop >= 0.5 ? "nodding" : "upright";
   drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
@@ -339,7 +316,6 @@ function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
   );
 }
 
-// a single fixed panel for all per-cue readouts, so labels never overlap regardless of face size/position
 function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   const lines = [
     left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR },
@@ -443,7 +419,6 @@ async function main() {
   let noFaceSince = null;
 
   async function runCalibration() {
-    // pause the main render loop so it doesn't fight the calibration overlay for the same canvas
     paused = true;
     stopAlarm();
     const calibrated = await calibrate(
@@ -466,11 +441,11 @@ async function main() {
   await runCalibration();
   muteBtn.style.display = "inline-block";
 
-  const eyeSmoother = new RollingMedian(5);
-  const leftEyeSmoother = new RollingMedian(5);
-  const rightEyeSmoother = new RollingMedian(5);
-  const mouthSmoother = new RollingMedian(5);
-  const headSmoother = new RollingMedian(5);
+  const eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const leftEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const rightEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const mouthSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const headSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
 
   const eyeMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -511,10 +486,10 @@ async function main() {
       if (!faceFound) {
         if (noFaceSince === null) noFaceSince = performance.now();
       } else if (noFaceSince !== null) {
-        // a face reappearing after a real gap likely means a new driver, so recalibrate for them automatically
+        // A face returning after a real gap is likely a new driver.
         const gap = performance.now() - noFaceSince;
         noFaceSince = null;
-        if (gap >= NO_FACE_RECALIBRATE_GAP_MS) {
+        if (gap >= CONFIG.live.recalibrateGapSec * 1000) {
           await runCalibration();
           requestAnimationFrame(frame);
           return;
@@ -534,14 +509,11 @@ async function main() {
         const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
         const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
         const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-        // drop a region individually (not just when the crop geometry fails, but also when the crop is too
-        // flat/featureless to be real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame
         const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
         const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
         const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
 
         if (leftBox || rightBox) {
-          // run all CNN calls concurrently instead of awaiting each GPU round-trip in turn
           const calls = [];
           if (leftBox) calls.push(drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother));
           if (rightBox) calls.push(drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother));
@@ -553,8 +525,6 @@ async function main() {
           if (mouthBox) mouthResult = results[idx++];
 
           const eyeReadings = [leftResult, rightResult].filter(Boolean);
-          // average both eyes so one drooping eyelid still raises the score; if neither eye is readable
-          // (e.g. an opaque tinted visor), report no reading rather than fabricating one
           eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
           mouthOpenness = mouthResult ? mouthResult.openness : null;
           if (result.facialTransformationMatrixes.length) {
@@ -693,7 +663,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
     mirrorCtx.restore();
   }
   ctx.drawImage(mirrorCanvas, 0, 0);
-  // no glare removal for a single uploaded photo (matches predict.py's scope) -- just keep this canvas valid for drawEye/drawMouth's crop source
+  // Uploaded photos skip glare removal, matching predict.py.
   glareCleanCanvas.width = mirrorCanvas.width;
   glareCleanCanvas.height = mirrorCanvas.height;
   glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
@@ -724,8 +694,6 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
   const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
   const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-  // drop a region individually (not just when the crop geometry fails, but also when the crop is too
-  // flat/featureless to be real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame
   const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
   const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
   const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
