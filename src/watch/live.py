@@ -17,11 +17,23 @@ GREEN, RED, AMBER, MAGENTA, ORANGE = (0, 200, 0), (0, 0, 220), (255, 200, 0), (2
 YELLOW, GRAY, WHITE, DIM = (0, 215, 255), (120, 120, 120), (255, 255, 255), (150, 150, 150)
 BANNERS = {0: ("NORMAL", GREEN), 1: ("WARNING", YELLOW), 2: ("CRITICAL", RED), "no_face": ("NO FACE DETECTED", GRAY)}
 EYE_CONTOURS = {"left": FACE_MESH.FACEMESH_RIGHT_EYE, "right": FACE_MESH.FACEMESH_LEFT_EYE}
-PANEL_WIDTH = 300
+PANEL_WIDTH, PANEL_HEIGHT = 300, 610
 
 
 def _text(image, text, x, y, color=WHITE, scale=0.45, thickness=1):
     cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def _side_by_side(frame, panel):
+    """Puts the dashboard beside the frame, padding the frame below when the dashboard is taller."""
+    extra = panel.shape[0] - frame.shape[0]
+    if extra > 0:
+        frame = cv2.copyMakeBorder(frame, 0, extra, 0, 0, cv2.BORDER_CONSTANT, value=(24, 24, 24))
+    return np.hstack([frame, panel])
+
+
+def _empty_panel(height):
+    return np.full((max(height, PANEL_HEIGHT), PANEL_WIDTH, 3), 24, np.uint8)
 
 
 def _level_box(panel, name, color, reason="", timer=""):
@@ -38,12 +50,26 @@ def _glare_mask(image: np.ndarray) -> np.ndarray:
     return (hsv[:, :, 2] > 235) & (hsv[:, :, 1] < 60)
 
 
-def remove_glare(image: np.ndarray) -> np.ndarray:
-    """Inpaints bright washed-out highlights such as visor reflections before landmark tracking."""
-    mask = _glare_mask(image).astype(np.uint8) * 255
+def remove_glare(image: np.ndarray, box=None) -> np.ndarray:
+    """Inpaints bright washed-out highlights such as visor reflections before landmark tracking, only inside box when given."""
+    x0, y0, x1, y1 = box or (0, 0, image.shape[1], image.shape[0])
+    region = image[y0:y1, x0:x1]
+    mask = _glare_mask(region).astype(np.uint8) * 255
     if not mask.any():
         return image
-    return cv2.inpaint(image, cv2.dilate(mask, np.ones((3, 3), np.uint8)), 3, cv2.INPAINT_TELEA)
+    cleaned = image.copy()
+    cleaned[y0:y1, x0:x1] = cv2.inpaint(region, cv2.dilate(mask, np.ones((3, 3), np.uint8)), 3, cv2.INPAINT_TELEA)
+    return cleaned
+
+
+def face_box(regions, shape, margin: float = 0.3):
+    """Landmark bounds grown by margin, where glare matters on the next frame."""
+    h, w = shape[:2]
+    xs = [p.x * w for p in regions.landmarks]
+    ys = [p.y * h for p in regions.landmarks]
+    pad_x, pad_y = (max(xs) - min(xs)) * margin, (max(ys) - min(ys)) * margin
+    box = (max(int(min(xs) - pad_x), 0), max(int(min(ys) - pad_y), 0), min(int(max(xs) + pad_x), w), min(int(max(ys) + pad_y), h))
+    return box if box[2] > box[0] and box[3] > box[1] else None
 
 
 def glare_fraction(image: np.ndarray, box) -> float:
@@ -91,6 +117,7 @@ class LiveMonitor:
         self.tracker = FaceTracker()
         self.alarm = Alarm()
         self.events = deque(maxlen=5)
+        self.calibrated = False
         self._reset()
 
     def _reset(self):
@@ -121,13 +148,14 @@ class LiveMonitor:
                     rolls.append(regions.roll)
             for y, text in ((40, "Calibrating, look at the camera normally"), (80, f"{remaining:.1f}s")):
                 cv2.putText(frame, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ORANGE, 2)
-            panel = np.full((frame.shape[0], PANEL_WIDTH, 3), 24, np.uint8)
+            panel = _empty_panel(frame.shape[0])
             _level_box(panel, "CALIBRATING", ORANGE, "look at the camera normally", f"{remaining:.1f}s left")
-            cv2.imshow(WINDOW, np.hstack([frame, panel]))
+            cv2.imshow(WINDOW, _side_by_side(frame, panel))
             cv2.waitKey(1)
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
-        if len(ears) < 10:
+        self.calibrated = len(ears) >= 10
+        if not self.calibrated:
             print("Calibration found no face, using default thresholds.")
         else:
             baseline = statistics.median(ears)
@@ -143,8 +171,8 @@ class LiveMonitor:
         print(f"Thresholds: EAR closed<={self.ear['closed_threshold']:.2f}, pitch drooped>={self.head['drooped_threshold']:.1f}")
         self._reset()
 
-    def _eye(self, frame, side, eye):
-        _, confidence, cnn_closed = self.eye_model.predict(eye.crop)
+    def _eye(self, frame, side, eye, prediction):
+        _, confidence, cnn_closed = prediction
         if confidence < self.settings["min_cnn_confidence"]:
             return None
         ear_closed = eye.ratio <= self.ear["closed_threshold"] and glare_fraction(frame, eye.box) < self.settings["ear_glare_tolerance"]
@@ -199,10 +227,11 @@ class LiveMonitor:
             for i in (10, 152):
                 cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
 
-        return np.hstack([frame, self._dashboard(h, regions, cues, escalation, statuses, fps, brightness)])
+        return _side_by_side(frame, self._dashboard(h, regions, cues, escalation, statuses, fps, brightness))
 
     def _dashboard(self, height, regions, cues, escalation, statuses, fps, brightness):
-        panel = np.full((height, PANEL_WIDTH, 3), 24, np.uint8)
+        panel = _empty_panel(height)
+        height = panel.shape[0]
         name, color = BANNERS["no_face" if regions is None and escalation.level == 0 else escalation.level]
         timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
         _level_box(panel, name, color, escalation.reason, timer)
@@ -240,11 +269,24 @@ class LiveMonitor:
             _text(panel, label, 14, y)
             _text(panel, value, 104, y, value_color)
 
-        _text(panel, "RECENT EVENTS", 14, 376, DIM, 0.4)
+        _text(panel, "CALIBRATION", 14, 376, DIM, 0.4)
+        calibration = (
+            ("Status", "personal" if self.calibrated else "default", GREEN if self.calibrated else YELLOW),
+            ("Open eye", f"EAR {self.ear['open_threshold']:.2f}", WHITE),
+            ("Closed eye", f"EAR <= {self.ear['closed_threshold']:.2f}", WHITE),
+            ("Head down", f">= {self.head['drooped_threshold']:.1f} deg", WHITE),
+            ("Head tilt", f">= {self.head['roll_drooped_threshold']:.1f} deg", WHITE),
+        )
+        for i, (label, value, value_color) in enumerate(calibration):
+            y = 398 + 20 * i
+            _text(panel, label, 14, y)
+            _text(panel, value, 124, y, value_color)
+
+        _text(panel, "RECENT EVENTS", 14, 506, DIM, 0.4)
         if not self.events:
-            _text(panel, "none yet", 14, 396, DIM, 0.4)
+            _text(panel, "none yet", 14, 526, DIM, 0.4)
         for i, (stamp, level, reason) in enumerate(reversed(self.events)):
-            if (y := 396 + 18 * i) > height - 6:
+            if (y := 526 + 18 * i) > height - 6:
                 break
             name, color = BANNERS[level]
             _text(panel, f"{stamp} {name} {reason}"[:40], 14, y, color, 0.4)
@@ -252,10 +294,12 @@ class LiveMonitor:
 
     def run(self):
         self.calibrate()
-        no_face_since, previous = None, time.time()
+        no_face_since, previous, glare_box = None, time.time(), None
         try:
             while (frame := self._read()) is not None:
-                regions = self.tracker.extract(remove_glare(frame))
+                # Only glare on the face matters, so skip bright spots elsewhere such as windows.
+                regions = self.tracker.extract(remove_glare(frame, glare_box))
+                glare_box = face_box(regions, frame.shape) if regions else None
                 if regions is None:
                     no_face_since = no_face_since or time.time()
                 elif no_face_since is not None:
@@ -267,7 +311,8 @@ class LiveMonitor:
 
                 cues = {}
                 if regions:
-                    cues = {side: self._eye(frame, side, eye) for side, eye in regions.eyes.items()}
+                    predictions = self.eye_model.predict_many([eye.crop for eye in regions.eyes.values()]) if regions.eyes else []
+                    cues = {side: self._eye(frame, side, eye, prediction) for (side, eye), prediction in zip(regions.eyes.items(), predictions)}
                     cues["mouth"] = self._mouth(regions.mouth) if regions.mouth else None
                     cues["head"] = self._head(regions.pitch, regions.roll)
                 # The eye nearer the camera looks wider, so it counts more.

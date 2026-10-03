@@ -33,34 +33,63 @@ const glareCleanCtx = glareCleanCanvas.getContext("2d", { willReadFrequently: tr
 const glareBlurCanvas = document.createElement("canvas");
 const glareBlurCtx = glareBlurCanvas.getContext("2d");
 
-// Replaces glare pixels with a blurred copy, standing in for the OpenCV inpaint used in live.py.
-function removeGlare(sourceCanvas, targetCtx) {
+// The current frame's pixels and glare mask, reused by the glare and low-detail checks instead of reading the canvas again.
+let framePixels = null;
+let frameWidth = 0;
+let glareMask = new Uint8Array(0);
+
+function fitCanvas(target, w, h) {
+  if (target.width !== w || target.height !== h) {
+    target.width = w;
+    target.height = h;
+  }
+}
+
+// Replaces glare pixels with a blurred copy, standing in for the OpenCV inpaint used in live.py, then lifts low light.
+// When box is given, only glare inside it is replaced, matching remove_glare in live.py.
+function removeGlare(sourceCanvas, targetCtx, inpaint = true, box = null) {
   const w = sourceCanvas.width, h = sourceCanvas.height;
-  targetCtx.canvas.width = w;
-  targetCtx.canvas.height = h;
+  fitCanvas(targetCtx.canvas, w, h);
   targetCtx.drawImage(sourceCanvas, 0, 0);
+  const image = targetCtx.getImageData(0, 0, w, h);
+  const data = image.data;
 
-  glareBlurCanvas.width = w;
-  glareBlurCanvas.height = h;
-  glareBlurCtx.filter = "blur(6px)";
-  glareBlurCtx.drawImage(sourceCanvas, 0, 0);
-  glareBlurCtx.filter = "none";
+  if (glareMask.length !== w * h) glareMask = new Uint8Array(w * h);
+  let glareCount = 0;
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    glareMask[j] = isGlarePixel(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+    glareCount += glareMask[j];
+  }
 
-  const sharp = targetCtx.getImageData(0, 0, w, h);
-  const blurred = glareBlurCtx.getImageData(0, 0, w, h);
-  const data = sharp.data;
-  const blurData = blurred.data;
+  const { x0, y0, x1, y1 } = box || { x0: 0, y0: 0, x1: w, y1: h };
+  if (box) {
+    glareCount = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) glareCount += glareMask[y * w + x];
+  }
 
-  for (let i = 0; i < data.length; i += 4) {
-    if (isGlarePixel(data[i], data[i + 1], data[i + 2])) {
-      data[i] = blurData[i];
-      data[i + 1] = blurData[i + 1];
-      data[i + 2] = blurData[i + 2];
+  let changed = false;
+  if (inpaint && glareCount) {
+    fitCanvas(glareBlurCanvas, w, h);
+    glareBlurCtx.filter = "blur(6px)";
+    glareBlurCtx.drawImage(sourceCanvas, 0, 0);
+    glareBlurCtx.filter = "none";
+    const blurData = glareBlurCtx.getImageData(0, 0, w, h).data;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const j = y * w + x, i = j * 4;
+        if (!glareMask[j]) continue;
+        data[i] = blurData[i];
+        data[i + 1] = blurData[i + 1];
+        data[i + 2] = blurData[i + 2];
+      }
     }
+    changed = true;
   }
 
   const brightness = liftLowLight(data);
-  targetCtx.putImageData(sharp, 0, 0);
+  if (changed || (brightness > 0 && brightness < CONFIG.live.lowLightMean)) targetCtx.putImageData(image, 0, 0);
+  framePixels = data;
+  frameWidth = w;
   return brightness;
 }
 
@@ -84,11 +113,16 @@ function liftLowLight(data) {
   return mean;
 }
 
-function liftLowLightCanvas(targetCtx) {
-  const { width, height } = targetCtx.canvas;
-  const image = targetCtx.getImageData(0, 0, width, height);
-  liftLowLight(image.data);
-  targetCtx.putImageData(image, 0, 0);
+// Mirrors face_box in live.py.
+function faceBox(landmarks, w, h, margin = 0.3) {
+  const xs = landmarks.map((p) => p.x * w), ys = landmarks.map((p) => p.y * h);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const padX = (maxX - minX) * margin, padY = (maxY - minY) * margin;
+  const box = {
+    x0: Math.max(Math.floor(minX - padX), 0), y0: Math.max(Math.floor(minY - padY), 0),
+    x1: Math.min(Math.ceil(maxX + padX), w), y1: Math.min(Math.ceil(maxY + padY), h),
+  };
+  return box.x1 > box.x0 && box.y1 > box.y0 ? box : null;
 }
 
 function isGlarePixel(r, g, b) {
@@ -96,41 +130,37 @@ function isGlarePixel(r, g, b) {
   return max > 235 && max - min < 60;
 }
 
+function boxRange(box) {
+  const x0 = Math.max(0, Math.floor(box.xMin)), y0 = Math.max(0, Math.floor(box.yMin));
+  const x1 = Math.min(frameWidth, Math.ceil(box.xMax)), y1 = Math.min(framePixels.length / 4 / frameWidth, Math.ceil(box.yMax));
+  return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
+}
+
 // Fraction of a box on the original frame that is glare.
 function glareFraction(box) {
-  const x = Math.max(0, Math.floor(box.xMin));
-  const y = Math.max(0, Math.floor(box.yMin));
-  const w = Math.max(0, Math.ceil(box.xMax) - x);
-  const h = Math.max(0, Math.ceil(box.yMax) - y);
-  if (w <= 0 || h <= 0) return 0.0;
-  const { data } = mirrorCtx.getImageData(x, y, w, h);
+  const r = boxRange(box);
+  if (!r) return 0.0;
   let glareCount = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    if (isGlarePixel(data[i], data[i + 1], data[i + 2])) glareCount++;
+  for (let y = r.y0; y < r.y1; y++) {
+    for (let x = r.x0; x < r.x1; x++) glareCount += glareMask[y * frameWidth + x];
   }
-  return glareCount / (data.length / 4);
+  return glareCount / ((r.x1 - r.x0) * (r.y1 - r.y0));
 }
 
 // True if a box is too flat to be real facial detail, such as an opaque visor.
 function isLowDetail(box) {
-  const x = Math.max(0, Math.floor(box.xMin));
-  const y = Math.max(0, Math.floor(box.yMin));
-  const w = Math.max(0, Math.ceil(box.xMax) - x);
-  const h = Math.max(0, Math.ceil(box.yMax) - y);
-  if (w <= 0 || h <= 0) return true;
-  const { data } = glareCleanCtx.getImageData(x, y, w, h);
-  const n = data.length / 4;
-  const grays = new Float64Array(n);
-  let sum = 0;
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    grays[j] = gray;
-    sum += gray;
+  const r = boxRange(box);
+  if (!r) return true;
+  let sum = 0, sumSq = 0;
+  for (let y = r.y0; y < r.y1; y++) {
+    for (let x = r.x0, i = (y * frameWidth + r.x0) * 4; x < r.x1; x++, i += 4) {
+      const gray = framePixels[i] * 0.299 + framePixels[i + 1] * 0.587 + framePixels[i + 2] * 0.114;
+      sum += gray;
+      sumSq += gray * gray;
+    }
   }
-  const mean = sum / n;
-  let variance = 0;
-  for (let j = 0; j < n; j++) variance += (grays[j] - mean) ** 2;
-  return Math.sqrt(variance / n) < CONFIG.live.lowDetailStd;
+  const n = (r.x1 - r.x0) * (r.y1 - r.y0), mean = sum / n;
+  return Math.sqrt(Math.max(0, sumSq / n - mean * mean)) < CONFIG.live.lowDetailStd;
 }
 
 const statusEl = document.getElementById("status");
@@ -214,8 +244,7 @@ cropCanvas.width = CONFIG.imageSize[0];
 cropCanvas.height = CONFIG.imageSize[1];
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
 
-// Mirrors Classifier.predict in src/watch/model.py.
-async function predictClassState(model, sourceCanvas, crop, classNames, positiveClass, desaturate = false) {
+function cropInput(sourceCanvas, crop, desaturate) {
   cropCtx.fillStyle = "#000";
   cropCtx.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
   cropCtx.save();
@@ -225,23 +254,42 @@ async function predictClassState(model, sourceCanvas, crop, classNames, positive
   cropCtx.translate(-crop.cx, -crop.cy);
   cropCtx.drawImage(sourceCanvas, 0, 0);
   cropCtx.restore();
-  const predictionTensor = tf.tidy(() => {
-    let input = tf.browser.fromPixels(cropCanvas).toFloat();
-    if (desaturate) {
-      const [r, g, b] = tf.split(input, 3, 2);
-      const gray = r.mul(0.299).add(g.mul(0.587)).add(b.mul(0.114));
-      input = tf.concat([gray, gray, gray], 2);
-    }
-    return model.predict(input.div(255.0).expandDims(0));
+  let input = tf.browser.fromPixels(cropCanvas).toFloat();
+  if (desaturate) {
+    const [r, g, b] = tf.split(input, 3, 2);
+    const gray = r.mul(0.299).add(g.mul(0.587)).add(b.mul(0.114));
+    input = tf.concat([gray, gray, gray], 2);
+  }
+  return input.div(255.0);
+}
+
+// Mirrors Classifier.predict in src/watch/model.py, running all of one model's crops as a single batch.
+async function predictCrops(model, sourceCanvas, crops, classNames, positiveClass, desaturate = false) {
+  const present = crops.filter(Boolean);
+  if (!present.length) return crops.map(() => null);
+  const output = tf.tidy(() => model.predict(tf.stack(present.map((crop) => cropInput(sourceCanvas, crop, desaturate)))));
+  const values = await output.data();
+  output.dispose();
+  const size = classNames.length;
+  let row = 0;
+  return crops.map((crop) => {
+    if (!crop) return null;
+    const prediction = Array.from(values.slice(row * size, ++row * size));
+    const predictedIndex = prediction.indexOf(Math.max(...prediction));
+    return {
+      label: classNames[predictedIndex],
+      confidence: prediction[predictedIndex],
+      positiveProbability: prediction[classNames.indexOf(positiveClass)],
+    };
   });
-  const prediction = await predictionTensor.data();
-  predictionTensor.dispose();
-  const predictedIndex = prediction.indexOf(Math.max(...prediction));
-  return {
-    label: classNames[predictedIndex],
-    confidence: prediction[predictedIndex],
-    positiveProbability: prediction[classNames.indexOf(positiveClass)],
-  };
+}
+
+async function predictRegions(regions, eyeModel, yawnModel) {
+  const [[left, right], [mouth]] = await Promise.all([
+    predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true),
+    predictCrops(yawnModel, glareCleanCanvas, [regions.mouth?.crop], CONFIG.yawnClassNames, "yawn"),
+  ]);
+  return { left, right, mouth };
 }
 
 let earCfg = CONFIG.ear;
@@ -345,8 +393,8 @@ function drawHeadAxis(landmarks, color) {
   }
 }
 
-async function drawEye(side, box, crop, ear, model, earCfg, landmarks, smoother) {
-  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, crop, CONFIG.eyeClassNames, "eyes_closed", true);
+function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
+  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
   // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.
@@ -360,8 +408,8 @@ async function drawEye(side, box, crop, ear, model, earCfg, landmarks, smoother)
   return { closedness, label, ear, cnnClosedness, width: screenWidth(landmarks, side === "left" ? LEFT_EYE_AXIS : RIGHT_EYE_AXIS, canvas.width, canvas.height) };
 }
 
-async function drawMouth(crop, mar, model, landmarks) {
-  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, crop, CONFIG.yawnClassNames, "yawn");
+function drawMouth(prediction, mar, landmarks) {
+  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = prediction;
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
@@ -422,8 +470,36 @@ function setDashLevel(name, color, reason, timer, darkText) {
   document.getElementById("dashLevelTimer").textContent = timer;
 }
 
-function dashRow(color, label, value, extra = "") {
-  return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${color === DOT.gray ? "#888" : color}">${value}</span><span class="dim">${extra}</span>`;
+function dashRow(color, label, value, extra = "", valueColor = color === DOT.gray ? "#888" : color) {
+  return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${valueColor}">${value}</span><span class="dim">${extra}</span>`;
+}
+
+// The graphics chip the browser renders with; laptops often default browsers to the slower built-in one.
+function browserGpu() {
+  const gl = document.createElement("canvas").getContext("webgl");
+  const info = gl && gl.getExtension("WEBGL_debug_renderer_info");
+  const renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : "";
+  gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  const plain = renderer.replace(/\((R|TM)\)/g, "");
+  const name = plain.match(/ANGLE \([^,]+, (.+?)(?: \(0x| Direct3D|,)/)?.[1] || plain || "unknown";
+  const color = /swiftshader|software|basic render|llvmpipe|unknown/i.test(name) ? DOT.red : /nvidia|geforce|rtx|radeon rx/i.test(name) ? DOT.green : DOT.yellow;
+  const short = name.replace(/^NVIDIA /, "").replace(/ Laptop GPU$/, "");
+  return { name: short.length > 18 ? `${short.slice(0, 17)}…` : short, color };
+}
+const gpu = browserGpu();
+
+// Mirrors the calibration section of LiveMonitor._dashboard in src/watch/live.py.
+function showCalibration(calibrated) {
+  const rows = [
+    ["Status", calibrated ? "personal" : "default", calibrated ? DOT.green : DOT.yellow],
+    ["Open eye", `EAR ${earCfg.openThreshold.toFixed(2)}`],
+    ["Closed eye", `EAR ≤ ${earCfg.closedThreshold.toFixed(2)}`],
+    ["Head down", `≥ ${headPoseCfg.droopedThreshold.toFixed(1)}°`],
+    ["Head tilt", `≥ ${headPoseCfg.rollDroopedThreshold.toFixed(1)}°`],
+  ];
+  document.getElementById("dashCalibration").innerHTML = rows
+    .map(([label, value, color]) => (color ? dashRow(color, label, value) : dashRow("transparent", label, value, "", "#eee")))
+    .join("");
 }
 
 function resetDashboard() {
@@ -431,6 +507,7 @@ function resetDashboard() {
   dashLastLevel = 0;
   document.getElementById("dashSigns").innerHTML = "";
   document.getElementById("dashChecks").innerHTML = "";
+  document.getElementById("dashCalibration").innerHTML = "";
   document.getElementById("dashEvents").innerHTML = '<li class="dim">none yet</li>';
 }
 
@@ -469,6 +546,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
     ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
     ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
     ["FPS", fps.toFixed(0), fps >= 15 ? DOT.green : DOT.yellow],
+    ["GPU", gpu.name, gpu.color],
   ];
   document.getElementById("dashChecks").innerHTML = checks.map(([label, value, color]) => dashRow(color, label, value)).join("");
 
@@ -581,6 +659,8 @@ async function main() {
   headPoseCfg = CONFIG.headPose;
   let paused = false;
   let noFaceSince = null;
+  let lastZoomTry = -Infinity;
+  let glareBox = null;
 
   async function runCalibration() {
     paused = true;
@@ -592,14 +672,9 @@ async function main() {
     );
     if (calibrated) {
       earCfg = calibrated.ear;
-      statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
-      if (calibrated.headPose) {
-        headPoseCfg = calibrated.headPose;
-        statusEl.textContent += ` | head-pose: upright<=${headPoseCfg.uprightThreshold.toFixed(1)}, drooped>=${headPoseCfg.droopedThreshold.toFixed(1)}`;
-      }
-    } else {
-      statusEl.textContent = "Calibration failed (no face detected) -- using default EAR/head-pose thresholds.";
+      if (calibrated.headPose) headPoseCfg = calibrated.headPose;
     }
+    showCalibration(Boolean(calibrated));
     paused = false;
   }
 
@@ -644,11 +719,16 @@ async function main() {
         return;
       }
       updateMirror();
-      const brightness = removeGlare(mirrorCanvas, glareCleanCtx);
+      // Only glare on the face matters, so skip bright spots elsewhere such as windows.
+      const brightness = removeGlare(mirrorCanvas, glareCleanCtx, true, glareBox);
       let result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
       // Retry faces the tracker misses, such as one far from the camera.
-      if (!result.faceLandmarks.length) result = (await detectZoomed(zoomLandmarker, glareCleanCanvas)) || result;
+      if (!result.faceLandmarks.length && performance.now() - lastZoomTry > 500) {
+        lastZoomTry = performance.now();
+        result = (await detectZoomed(zoomLandmarker, glareCleanCanvas)) || result;
+      }
       const faceFound = result.faceLandmarks.length > 0;
+      glareBox = faceFound ? faceBox(result.faceLandmarks[0], canvas.width, canvas.height) : null;
 
       if (!faceFound) {
         if (noFaceSince === null) noFaceSince = performance.now();
@@ -672,11 +752,10 @@ async function main() {
         const w = canvas.width, h = canvas.height;
 
         const regions = readableRegions(lm, w, h);
-        [leftResult, rightResult, mouthResult] = await Promise.all([
-          regions.left && drawEye("left", regions.left.box, regions.left.crop, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), eyeModel, earCfg, lm, leftEyeSmoother),
-          regions.right && drawEye("right", regions.right.box, regions.right.crop, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), eyeModel, earCfg, lm, rightEyeSmoother),
-          regions.mouth && drawMouth(regions.mouth.crop, mouthAspectRatio(lm, w, h), yawnModel, lm),
-        ]);
+        const predictions = await predictRegions(regions, eyeModel, yawnModel);
+        leftResult = regions.left && drawEye("left", regions.left.box, predictions.left, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), earCfg, lm, leftEyeSmoother);
+        rightResult = regions.right && drawEye("right", regions.right.box, predictions.right, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), earCfg, lm, rightEyeSmoother);
+        mouthResult = regions.mouth && drawMouth(predictions.mouth, mouthAspectRatio(lm, w, h), lm);
         eyeClosedness = eyeClosednessOf([leftResult, rightResult]);
         mouthOpenness = mouthResult ? mouthResult.openness : null;
         if (result.facialTransformationMatrixes.length) {
@@ -810,10 +889,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   }
   ctx.drawImage(mirrorCanvas, 0, 0);
   // Uploaded photos skip glare removal, matching predict.py.
-  glareCleanCanvas.width = mirrorCanvas.width;
-  glareCleanCanvas.height = mirrorCanvas.height;
-  glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
-  liftLowLightCanvas(glareCleanCtx);
+  removeGlare(mirrorCanvas, glareCleanCtx, false);
 
   statusEl.textContent = "";
   let result = uploadFaceLandmarker.detect(glareCleanCanvas);
@@ -831,9 +907,10 @@ async function handleImageUpload(file, alreadyMirrored = false) {
 
   const lm = result.faceLandmarks[0];
   const regions = readableRegions(lm, w, h);
-  const left = regions.left ? await drawEye("left", regions.left.box, regions.left.crop, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), eyeModel, earCfg, lm) : null;
-  const right = regions.right ? await drawEye("right", regions.right.box, regions.right.crop, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), eyeModel, earCfg, lm) : null;
-  const mouth = regions.mouth ? await drawMouth(regions.mouth.crop, mouthAspectRatio(lm, w, h), yawnModel, lm) : null;
+  const predictions = await predictRegions(regions, eyeModel, yawnModel);
+  const left = regions.left ? drawEye("left", regions.left.box, predictions.left, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), earCfg, lm) : null;
+  const right = regions.right ? drawEye("right", regions.right.box, predictions.right, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), earCfg, lm) : null;
+  const mouth = regions.mouth ? drawMouth(predictions.mouth, mouthAspectRatio(lm, w, h), lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
     const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
