@@ -19,7 +19,7 @@ const CONFIG = {
     "closednessThreshold": 0.85
   },
   "yawn": {
-    "closedDurationThresholdSec": 3.0,
+    "closedDurationThresholdSec": 2.0,
     "perclosWindowSec": 8.0,
     "perclosThreshold": 0.8,
     "closednessThreshold": 0.5,

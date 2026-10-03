@@ -72,7 +72,7 @@ alertness:
   closedness_threshold: 0.85
 
 yawn:
-  closed_duration_threshold_sec: 3.0
+  closed_duration_threshold_sec: 2.0
   perclos_window_sec: 8.0
   perclos_threshold: 0.8
   closedness_threshold: 0.5
