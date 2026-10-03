@@ -1,4 +1,4 @@
-from watch.alertness import AlertnessMonitor, AlertnessStatus, EscalationMonitor, RollingMedian
+from watch.alertness import AlertnessMonitor, AlertnessStatus, EscalationMonitor, RollingMedian, head_droop
 
 
 def _monitor(grace=0.0):
@@ -104,3 +104,22 @@ def test_face_lost_holds_level_and_pauses_window():
     monitor.update(_statuses(), True, 1.0)
     assert monitor.update(_statuses(), False, 100.0).level == 1
     assert monitor.update(_statuses(), True, 101.0).level == 1
+
+
+HEAD = {"upright_threshold": 5.0, "drooped_threshold": 30.0, "roll_upright_threshold": 2.0, "roll_drooped_threshold": 27.0}
+
+
+def test_head_droop_straight_down_or_sideways():
+    assert head_droop(30.0, 2.0, HEAD) == 1.0
+    assert head_droop(5.0, 27.0, HEAD) == 1.0
+    assert head_droop(17.5, 2.0, HEAD) == 0.5
+
+
+def test_head_droop_counts_diagonal_tilts():
+    # 18 degrees down and 18 to the side is drooped although neither reaches 25 alone.
+    assert head_droop(5.0 + 18, 2.0 + 18, HEAD) == 1.0
+    assert head_droop(5.0 + 10, 2.0 + 10, HEAD) < 1.0
+
+
+def test_head_droop_ignores_looking_up():
+    assert head_droop(-20.0, 2.0, HEAD) == 0.0

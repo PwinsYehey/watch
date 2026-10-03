@@ -1,5 +1,13 @@
 // Browser port of src/watch/alertness.py, keep behaviour identical.
 
+// Mirrors head_droop in src/watch/alertness.py.
+function headDroop(pitch, roll, cfg) {
+  const past = (value, upright, drooped) => (drooped === upright ? 0 : Math.max(0, (value - upright) / (drooped - upright)));
+  const down = past(pitch, cfg.uprightThreshold, cfg.droopedThreshold);
+  const side = past(roll, cfg.rollUprightThreshold, cfg.rollDroopedThreshold);
+  return Math.min(1, Math.hypot(down, side));
+}
+
 class RollingMedian {
   constructor(size) {
     this.size = size;

@@ -1,6 +1,18 @@
+import math
 import statistics
 from collections import deque
 from dataclasses import dataclass
+
+
+def head_droop(pitch: float, roll: float, head: dict) -> float:
+    """0 upright to 1 drooped. Looking down and tilting sideways add up, so a diagonal droop counts as well as a straight one."""
+
+    def past(value, upright, drooped):
+        return 0.0 if drooped == upright else max(0.0, (value - upright) / (drooped - upright))
+
+    down = past(pitch, head["upright_threshold"], head["drooped_threshold"])
+    side = past(roll, head["roll_upright_threshold"], head["roll_drooped_threshold"])
+    return min(1.0, math.hypot(down, side))
 
 
 @dataclass

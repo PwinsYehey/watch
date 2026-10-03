@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from watch import dashboard as ui
-from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian
+from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian, head_droop
 from watch.config import load_config
 from watch.face import FACE_MESH, FaceTracker, mean_brightness
 from watch.model import Classifier
@@ -165,11 +165,7 @@ class LiveMonitor:
     def _head(self, pitch, roll):
         if pitch is None:
             return None
-        head = self.head
-        droop = max(
-            linear_score(pitch, head["upright_threshold"], head["drooped_threshold"]),
-            linear_score(roll, head["roll_upright_threshold"], head["roll_drooped_threshold"]),
-        )
+        droop = head_droop(pitch, roll, self.head)
         label = "nodding" if droop >= self.config["nod"]["closedness_threshold"] else "upright"
         return {"score": droop, "label": label, "pitch": pitch, "roll": roll}
 

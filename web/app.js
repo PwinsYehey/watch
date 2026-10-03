@@ -424,9 +424,7 @@ function drawMouth(prediction, mar, landmarks) {
 
 function headPoseStatus(pitch, roll, landmarks) {
   if (pitch === null || roll === null) return null;
-  const pitchDroop = linearScore(pitch, headPoseCfg.uprightThreshold, headPoseCfg.droopedThreshold);
-  const rollDroop = linearScore(roll, headPoseCfg.rollUprightThreshold, headPoseCfg.rollDroopedThreshold);
-  const droop = Math.max(pitchDroop, rollDroop);
+  const droop = headDroop(pitch, roll, headPoseCfg);
   const label = droop >= CONFIG.nod.closednessThreshold ? "nodding" : "upright";
   const color = label === "upright" ? HEAD_COLOR : CLOSED_COLOR;
   drawBrackets(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, 0.05, color, 3);
