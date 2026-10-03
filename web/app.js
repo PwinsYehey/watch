@@ -1,8 +1,5 @@
-// Ports src/frames/inference/live_monitor.py to the browser using MediaPipe Tasks Vision + TensorFlow.js.
-import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
-
-// a real gap this long (not just a blink or a momentary tracking miss) means the driver likely changed
-const NO_FACE_RECALIBRATE_GAP_MS = 3000;
+// Browser port of src/watch/live.py using MediaPipe Tasks Vision and TensorFlow.js.
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 480;
@@ -16,6 +13,8 @@ const originalPanel = document.getElementById("originalPanel");
 const scannedLabel = document.getElementById("scannedLabel");
 const captureHint = document.getElementById("captureHint");
 const flashOverlay = document.getElementById("flashOverlay");
+const placeholder = document.getElementById("placeholder");
+const dashboard = document.getElementById("dashboard");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -30,89 +29,140 @@ function updateMirror() {
   mirrorCtx.restore();
 }
 
-// tracking/CNN-input-only copy of the frame with glare smoothed out -- the displayed video (mirrorCanvas/canvas) stays untouched
+// Glare-cleaned copy of the frame used only for tracking and model input.
 const glareCleanCanvas = document.createElement("canvas");
 const glareCleanCtx = glareCleanCanvas.getContext("2d", { willReadFrequently: true });
 const glareBlurCanvas = document.createElement("canvas");
 const glareBlurCtx = glareBlurCanvas.getContext("2d");
 
-// mirrors _remove_glare in live_monitor.py -- smooths out bright, washed-out specular highlights (e.g. visor glare)
-// before landmark tracking; no OpenCV inpaint available in-browser, so a blurred copy stands in for the reconstructed pixels
-function removeGlare(sourceCanvas, targetCtx) {
-  const w = sourceCanvas.width, h = sourceCanvas.height;
-  targetCtx.canvas.width = w;
-  targetCtx.canvas.height = h;
-  targetCtx.drawImage(sourceCanvas, 0, 0);
+// The current frame's pixels and glare mask, reused by the glare and low-detail checks instead of reading the canvas again.
+let framePixels = null;
+let frameWidth = 0;
+let glareMask = new Uint8Array(0);
 
-  glareBlurCanvas.width = w;
-  glareBlurCanvas.height = h;
-  glareBlurCtx.filter = "blur(6px)";
-  glareBlurCtx.drawImage(sourceCanvas, 0, 0);
-  glareBlurCtx.filter = "none";
-
-  const sharp = targetCtx.getImageData(0, 0, w, h);
-  const blurred = glareBlurCtx.getImageData(0, 0, w, h);
-  const data = sharp.data;
-  const blurData = blurred.data;
-
-  for (let i = 0; i < data.length; i += 4) {
-    if (isGlarePixel(data[i], data[i + 1], data[i + 2])) {
-      data[i] = blurData[i];
-      data[i + 1] = blurData[i + 1];
-      data[i + 2] = blurData[i + 2];
-    }
+function fitCanvas(target, w, h) {
+  if (target.width !== w || target.height !== h) {
+    target.width = w;
+    target.height = h;
   }
-
-  targetCtx.putImageData(sharp, 0, 0);
 }
 
-// glare is bright and washed-out (low saturation), unlike genuine skin/eye color
+// Replaces glare pixels with a blurred copy, standing in for the OpenCV inpaint used in live.py, then lifts low light.
+// When box is given, only glare inside it is replaced, matching remove_glare in live.py.
+function removeGlare(sourceCanvas, targetCtx, inpaint = true, box = null) {
+  const w = sourceCanvas.width, h = sourceCanvas.height;
+  fitCanvas(targetCtx.canvas, w, h);
+  targetCtx.drawImage(sourceCanvas, 0, 0);
+  const image = targetCtx.getImageData(0, 0, w, h);
+  const data = image.data;
+
+  if (glareMask.length !== w * h) glareMask = new Uint8Array(w * h);
+  let glareCount = 0;
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    glareMask[j] = isGlarePixel(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+    glareCount += glareMask[j];
+  }
+
+  const { x0, y0, x1, y1 } = box || { x0: 0, y0: 0, x1: w, y1: h };
+  if (box) {
+    glareCount = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) glareCount += glareMask[y * w + x];
+  }
+
+  let changed = false;
+  if (inpaint && glareCount) {
+    fitCanvas(glareBlurCanvas, w, h);
+    glareBlurCtx.filter = "blur(6px)";
+    glareBlurCtx.drawImage(sourceCanvas, 0, 0);
+    glareBlurCtx.filter = "none";
+    const blurData = glareBlurCtx.getImageData(0, 0, w, h).data;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const j = y * w + x, i = j * 4;
+        if (!glareMask[j]) continue;
+        data[i] = blurData[i];
+        data[i + 1] = blurData[i + 1];
+        data[i + 2] = blurData[i + 2];
+      }
+    }
+    changed = true;
+  }
+
+  const brightness = liftLowLight(data);
+  if (changed || (brightness > 0 && brightness < CONFIG.live.lowLightMean)) targetCtx.putImageData(image, 0, 0);
+  framePixels = data;
+  frameWidth = w;
+  return brightness;
+}
+
+// Mirrors brighten in src/watch/face.py.
+function liftLowLight(data) {
+  let sum = 0, count = 0;
+  for (let i = 0; i < data.length; i += 64) {
+    sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    count++;
+  }
+  const mean = sum / count / 255, target = CONFIG.live.lowLightTarget;
+  if (mean >= CONFIG.live.lowLightMean || mean <= 0) return mean;
+  const gamma = Math.log(target) / Math.log(mean);
+  const lut = new Uint8ClampedArray(256);
+  for (let v = 0; v < 256; v++) lut[v] = Math.pow(v / 255, gamma) * 255;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]];
+    data[i + 1] = lut[data[i + 1]];
+    data[i + 2] = lut[data[i + 2]];
+  }
+  return mean;
+}
+
+// Mirrors face_box in live.py.
+function faceBox(landmarks, w, h, margin = 0.3) {
+  const xs = landmarks.map((p) => p.x * w), ys = landmarks.map((p) => p.y * h);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const padX = (maxX - minX) * margin, padY = (maxY - minY) * margin;
+  const box = {
+    x0: Math.max(Math.floor(minX - padX), 0), y0: Math.max(Math.floor(minY - padY), 0),
+    x1: Math.min(Math.ceil(maxX + padX), w), y1: Math.min(Math.ceil(maxY + padY), h),
+  };
+  return box.x1 > box.x0 && box.y1 > box.y0 ? box : null;
+}
+
 function isGlarePixel(r, g, b) {
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   return max > 235 && max - min < 60;
 }
 
-const EAR_GLARE_TOLERANCE = 0.15;
-
-// mirrors _glare_fraction in live_monitor.py -- fraction of a box on the ORIGINAL uncleaned frame that was glare
-function glareFraction(box) {
-  const x = Math.max(0, Math.floor(box.xMin));
-  const y = Math.max(0, Math.floor(box.yMin));
-  const w = Math.max(0, Math.ceil(box.xMax) - x);
-  const h = Math.max(0, Math.ceil(box.yMax) - y);
-  if (w <= 0 || h <= 0) return 0.0;
-  const { data } = mirrorCtx.getImageData(x, y, w, h);
-  let glareCount = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    if (isGlarePixel(data[i], data[i + 1], data[i + 2])) glareCount++;
-  }
-  return glareCount / (data.length / 4);
+function boxRange(box) {
+  const x0 = Math.max(0, Math.floor(box.xMin)), y0 = Math.max(0, Math.floor(box.yMin));
+  const x1 = Math.min(frameWidth, Math.ceil(box.xMax)), y1 = Math.min(framePixels.length / 4 / frameWidth, Math.ceil(box.yMax));
+  return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
 }
 
-const LOW_DETAIL_STD_THRESHOLD = 12.0;
-
-// mirrors _is_low_detail in facemesh.py -- true if a box is too flat/featureless to be real facial
-// detail (e.g. a solid patch of opaque tinted visor), checked on the crop the model would actually see
-function isLowDetail(box) {
-  const x = Math.max(0, Math.floor(box.xMin));
-  const y = Math.max(0, Math.floor(box.yMin));
-  const w = Math.max(0, Math.ceil(box.xMax) - x);
-  const h = Math.max(0, Math.ceil(box.yMax) - y);
-  if (w <= 0 || h <= 0) return true;
-  const { data } = glareCleanCtx.getImageData(x, y, w, h);
-  const n = data.length / 4;
-  const grays = new Float64Array(n);
-  let sum = 0;
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    // matches cv2.cvtColor's BGR2GRAY luma weights
-    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    grays[j] = gray;
-    sum += gray;
+// Fraction of a box on the original frame that is glare.
+function glareFraction(box) {
+  const r = boxRange(box);
+  if (!r) return 0.0;
+  let glareCount = 0;
+  for (let y = r.y0; y < r.y1; y++) {
+    for (let x = r.x0; x < r.x1; x++) glareCount += glareMask[y * frameWidth + x];
   }
-  const mean = sum / n;
-  let variance = 0;
-  for (let j = 0; j < n; j++) variance += (grays[j] - mean) ** 2;
-  return Math.sqrt(variance / n) < LOW_DETAIL_STD_THRESHOLD;
+  return glareCount / ((r.x1 - r.x0) * (r.y1 - r.y0));
+}
+
+// True if a box is too flat to be real facial detail, such as an opaque visor.
+function isLowDetail(box) {
+  const r = boxRange(box);
+  if (!r) return true;
+  let sum = 0, sumSq = 0;
+  for (let y = r.y0; y < r.y1; y++) {
+    for (let x = r.x0, i = (y * frameWidth + r.x0) * 4; x < r.x1; x++, i += 4) {
+      const gray = framePixels[i] * 0.299 + framePixels[i + 1] * 0.587 + framePixels[i + 2] * 0.114;
+      sum += gray;
+      sumSq += gray * gray;
+    }
+  }
+  const n = (r.x1 - r.x0) * (r.y1 - r.y0), mean = sum / n;
+  return Math.sqrt(Math.max(0, sumSq / n - mean * mean)) < CONFIG.live.lowDetailStd;
 }
 
 const statusEl = document.getElementById("status");
@@ -133,6 +183,13 @@ const MOUTH_COLOR = "#ffc800";
 const HEAD_COLOR = "#ff00c8";
 const BANNER_COLORS = { alert: "#00c800", not_alert: "#dc0000", no_face: "#ffa500" };
 const BANNER_TEXT = { alert: "ALERT", not_alert: "NOT ALERT", no_face: "NO FACE DETECTED" };
+// Mirrors BANNERS in src/watch/live.py.
+const LEVEL_BANNERS = {
+  0: { text: "NORMAL", color: "#00c800" },
+  1: { text: "WARNING", color: "#ffd700" },
+  2: { text: "CRITICAL", color: "#dc0000" },
+  no_face: { text: "NO FACE DETECTED", color: "#787878" },
+};
 
 function linearScore(value, lowAtZero, highAtOne) {
   const span = highAtOne - lowAtZero;
@@ -146,7 +203,7 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// a loud pulsing siren tone, started on NOT ALERT and stopped as soon as it clears
+// Pulsing alarm tone that plays while the state is NOT ALERT.
 let audioCtx = null;
 let alarmOscillator = null;
 let alarmGain = null;
@@ -184,37 +241,59 @@ function stopAlarm() {
   }
 }
 
-// tiny offscreen canvas reused for every crop -> model-input resize, avoids per-frame allocation
 const cropCanvas = document.createElement("canvas");
 cropCanvas.width = CONFIG.imageSize[0];
 cropCanvas.height = CONFIG.imageSize[1];
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
 
-// mirrors _predict_class_state in predict.py
-async function predictClassState(model, sourceCanvas, box, classNames, positiveClass, desaturate = false) {
-  cropCtx.drawImage(sourceCanvas, box.xMin, box.yMin, box.xMax - box.xMin, box.yMax - box.yMin, 0, 0, cropCanvas.width, cropCanvas.height);
-  // .data() is async and non-blocking; dataSync() stalls the main thread waiting on the GPU every call
-  const predictionTensor = tf.tidy(() => {
-    let input = tf.browser.fromPixels(cropCanvas).toFloat();
-    if (desaturate) {
-      // matches cv2.cvtColor(..., COLOR_BGR2GRAY)'s luma weights, replicated back to 3 channels
-      const [r, g, b] = tf.split(input, 3, 2);
-      const gray = r.mul(0.299).add(g.mul(0.587)).add(b.mul(0.114));
-      input = tf.concat([gray, gray, gray], 2);
-    }
-    return model.predict(input.div(255.0).expandDims(0));
-  });
-  const prediction = await predictionTensor.data();
-  predictionTensor.dispose();
-  const predictedIndex = prediction.indexOf(Math.max(...prediction));
-  return {
-    label: classNames[predictedIndex],
-    confidence: prediction[predictedIndex],
-    positiveProbability: prediction[classNames.indexOf(positiveClass)],
-  };
+function cropInput(sourceCanvas, crop, desaturate) {
+  cropCtx.fillStyle = "#000";
+  cropCtx.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+  cropCtx.save();
+  cropCtx.scale(cropCanvas.width / crop.width, cropCanvas.height / crop.height);
+  cropCtx.translate(-crop.xMin, -crop.yMin);
+  cropCtx.rotate(-crop.angle);
+  cropCtx.translate(-crop.cx, -crop.cy);
+  cropCtx.drawImage(sourceCanvas, 0, 0);
+  cropCtx.restore();
+  let input = tf.browser.fromPixels(cropCanvas).toFloat();
+  if (desaturate) {
+    const [r, g, b] = tf.split(input, 3, 2);
+    const gray = r.mul(0.299).add(g.mul(0.587)).add(b.mul(0.114));
+    input = tf.concat([gray, gray, gray], 2);
+  }
+  return input.div(255.0);
 }
 
-let drawingUtils = null;
+// Mirrors Classifier.predict in src/watch/model.py, running all of one model's crops as a single batch.
+async function predictCrops(model, sourceCanvas, crops, classNames, positiveClass, desaturate = false) {
+  const present = crops.filter(Boolean);
+  if (!present.length) return crops.map(() => null);
+  const output = tf.tidy(() => model.predict(tf.stack(present.map((crop) => cropInput(sourceCanvas, crop, desaturate)))));
+  const values = await output.data();
+  output.dispose();
+  const size = classNames.length;
+  let row = 0;
+  return crops.map((crop) => {
+    if (!crop) return null;
+    const prediction = Array.from(values.slice(row * size, ++row * size));
+    const predictedIndex = prediction.indexOf(Math.max(...prediction));
+    return {
+      label: classNames[predictedIndex],
+      confidence: prediction[predictedIndex],
+      positiveProbability: prediction[classNames.indexOf(positiveClass)],
+    };
+  });
+}
+
+async function predictRegions(regions, eyeModel, yawnModel) {
+  const [[left, right], [mouth]] = await Promise.all([
+    predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true),
+    predictCrops(yawnModel, glareCleanCanvas, [regions.mouth?.crop], CONFIG.yawnClassNames, "yawn"),
+  ]);
+  return { left, right, mouth };
+}
+
 let earCfg = CONFIG.ear;
 let headPoseCfg = CONFIG.headPose;
 
@@ -247,9 +326,10 @@ function ensureModels() {
         runningMode: "VIDEO",
         numFaces: 1,
         outputFacialTransformationMatrixes: true,
+        minFaceDetectionConfidence: CONFIG.live.faceDetectionConfidence,
+        minTrackingConfidence: CONFIG.live.faceTrackingConfidence,
       });
 
-      drawingUtils = new DrawingUtils(ctx);
       return { eyeModel, yawnModel, faceLandmarker, vision, baseOptions };
     })();
   }
@@ -279,38 +359,66 @@ function ensureBlazeface() {
   return blazefacePromise;
 }
 
-const MIN_CNN_CONFIDENCE = 0.65;
+// Mirrors brackets in src/watch/live.py.
+function drawBrackets(landmarks, connections, margin, color, lineWidth = 2) {
+  const ids = new Set(connections.flatMap((c) => [c.start, c.end]));
+  const xs = [...ids].map((i) => landmarks[i].x * canvas.width);
+  const ys = [...ids].map((i) => landmarks[i].y * canvas.height);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const padX = (x1 - x0) * margin, padY = (y1 - y0) * margin;
+  x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+  const length = Math.max(6, Math.min(x1 - x0, y1 - y0) * 0.25);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+    ctx.moveTo(x + dx * length, y);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x, y + dy * length);
+  }
+  ctx.stroke();
+}
 
-async function drawEye(side, box, ear, model, earCfg, landmarks, smoother) {
-  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.eyeClassNames, "eyes_closed", true);
-  if (cnnConfidence < MIN_CNN_CONFIDENCE) return null;
+// Forehead to chin, so sideways tilt is visible.
+function drawHeadAxis(landmarks, color) {
+  const [top, chin] = [10, 152].map((i) => ({ x: landmarks[i].x * canvas.width, y: landmarks[i].y * canvas.height }));
+  ctx.strokeStyle = ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(top.x, top.y);
+  ctx.lineTo(chin.x, chin.y);
+  ctx.stroke();
+  for (const p of [top, chin]) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
 
-  // a heavily glared eye region corrupts EAR's precise landmark geometry more than the CNN's holistic read,
-  // so a strong glare patch on one side of the eye no longer forces a false "eyes_closed" through the EAR side of the max() below
-  const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < EAR_GLARE_TOLERANCE ? 1.0 : 0.0;
-  // no gate -- now that the crop is square (matching the CNN's training data framing), trust it fully
+function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
+  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
+  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+
+  // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.
+  const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < CONFIG.live.earGlareTolerance ? 1.0 : 0.0;
   const rawClosedness = Math.max(earClosedness, cnnClosedness);
-  // smoothed per-eye so a single glare-jittered frame under a reflective visor can't flip the on-screen label
   const closedness = smoother ? smoother.add(rawClosedness) : rawClosedness;
   const label = closedness >= 0.5 ? "eyes_closed" : "eyes_opened";
 
   const connectors = side === "left" ? FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE : FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
-  drawingUtils.drawConnectors(landmarks, connectors, { color: label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR, lineWidth: 2 });
-  return { closedness, label, ear, cnnClosedness };
+  drawBrackets(landmarks, connectors, 0.25, label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR);
+  return { closedness, label, ear, cnnClosedness, width: screenWidth(landmarks, side === "left" ? LEFT_EYE_AXIS : RIGHT_EYE_AXIS, canvas.width, canvas.height) };
 }
 
-async function drawMouth(box, mar, model, landmarks) {
-  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = await predictClassState(model, glareCleanCanvas, box, CONFIG.yawnClassNames, "yawn");
-  // the yawn CNN has never seen a hand covering the mouth, so a low-confidence prediction is a sign
-  // this isn't really a mouth at all -- e.g. MediaPipe still guessed a plausible-looking box over a hand
-  if (cnnConfidence < MIN_CNN_CONFIDENCE) return null;
+function drawMouth(prediction, mar, landmarks) {
+  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = prediction;
+  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
-  // either signal suggesting a yawn is enough -- a safety monitor should not need both to agree
   const openness = Math.max(cnnOpenness, marOpenness);
   const label = openness >= 0.5 ? "yawn" : "no yawn";
 
-  drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LIPS, { color: label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR, lineWidth: 2 });
+  drawBrackets(landmarks, FaceLandmarker.FACE_LANDMARKS_LIPS, 0.2, label === "yawn" ? CLOSED_COLOR : MOUTH_COLOR);
   return { openness, label, mar };
 }
 
@@ -318,28 +426,154 @@ function headPoseStatus(pitch, roll, landmarks) {
   if (pitch === null || roll === null) return null;
   const pitchDroop = linearScore(pitch, headPoseCfg.uprightThreshold, headPoseCfg.droopedThreshold);
   const rollDroop = linearScore(roll, headPoseCfg.rollUprightThreshold, headPoseCfg.rollDroopedThreshold);
-  // either a forward nod or a sideways tilt toward the shoulder counts as drooping
   const droop = Math.max(pitchDroop, rollDroop);
-  const label = droop >= 0.5 ? "nodding" : "upright";
-  drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color: label === "upright" ? HEAD_COLOR : CLOSED_COLOR, lineWidth: 2 });
+  const label = droop >= CONFIG.nod.closednessThreshold ? "nodding" : "upright";
+  const color = label === "upright" ? HEAD_COLOR : CLOSED_COLOR;
+  drawBrackets(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, 0.05, color, 3);
+  drawHeadAxis(landmarks, color);
   return { droop, label, pitch, roll };
 }
 
-function drawBanner(state, eyeStatus, yawnStatus, nodStatus) {
-  ctx.fillStyle = BANNER_COLORS[state];
-  ctx.fillRect(0, 0, canvas.width, 50);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 18px sans-serif";
-  ctx.fillText(BANNER_TEXT[state], 20, 34);
-  ctx.font = "10px sans-serif";
-  ctx.fillText(
-    `eyes closed ${eyeStatus.closedDuration.toFixed(1)}s | mouth open ${yawnStatus.closedDuration.toFixed(1)}s | head drooped ${nodStatus.closedDuration.toFixed(1)}s`,
-    20,
-    70
-  );
+function readableRegions(lm, w, h) {
+  const region = (ids, axis, margin, square) => {
+    const box = boxFromLandmarks(lm, ids, w, h, margin, square);
+    const crop = box && !isLowDetail(box) ? alignedCropFromLandmarks(lm, ids, axis, w, h, margin, square) : null;
+    return crop ? { box, crop } : null;
+  };
+  return {
+    left: region(LEFT_EYE_IDS, LEFT_EYE_AXIS, 0.15, true),
+    right: region(RIGHT_EYE_IDS, RIGHT_EYE_AXIS, 0.15, true),
+    mouth: region(MOUTH_IDS, MOUTH_AXIS, 0.3),
+  };
 }
 
-// a single fixed panel for all per-cue readouts, so labels never overlap regardless of face size/position
+function eyeClosednessOf(readings) {
+  const eyes = readings.filter(Boolean);
+  const total = eyes.reduce((s, r) => s + r.width, 0);
+  return total ? eyes.reduce((s, r) => s + r.closedness * r.width, 0) / total : null;
+}
+
+function levelBanner(escalation, faceFound) {
+  return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
+}
+
+const dashLevel = document.getElementById("dashLevel");
+const DOT = { green: "#00c800", yellow: "#ffd700", red: "#dc0000", gray: "#787878" };
+let dashEvents = [];
+let dashLastLevel = 0;
+let dashLastDraw = -Infinity;
+
+function setDashLevel(name, color, reason, timer, darkText) {
+  dashLevel.style.background = color;
+  dashLevel.style.color = darkText ? "#000" : "#fff";
+  document.getElementById("dashLevelName").textContent = name;
+  document.getElementById("dashLevelReason").textContent = reason;
+  document.getElementById("dashLevelTimer").textContent = timer;
+}
+
+function dashRow(color, label, value, extra = "", valueColor = color === DOT.gray ? "#888" : color) {
+  return `<span class="dot" style="background:${color}"></span><span>${label}</span><span style="color:${valueColor}">${value}</span><span class="dim">${extra}</span>`;
+}
+
+// The graphics chip the browser renders with; laptops often default browsers to the slower built-in one.
+function browserGpu() {
+  const gl = document.createElement("canvas").getContext("webgl");
+  const info = gl && gl.getExtension("WEBGL_debug_renderer_info");
+  const renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : "";
+  gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  const plain = renderer.replace(/\((R|TM)\)/g, "");
+  const name = plain.match(/ANGLE \([^,]+, (.+?)(?: \(0x| Direct3D|,)/)?.[1] || plain || "unknown";
+  const color = /swiftshader|software|basic render|llvmpipe|unknown/i.test(name) ? DOT.red : /nvidia|geforce|rtx|radeon rx/i.test(name) ? DOT.green : DOT.yellow;
+  const short = name.replace(/^NVIDIA /, "").replace(/ Laptop GPU$/, "");
+  return { name: short.length > 18 ? `${short.slice(0, 17)}…` : short, color };
+}
+const gpu = browserGpu();
+
+// Mirrors the calibration section of LiveMonitor._dashboard in src/watch/live.py.
+function showCalibration(calibrated) {
+  const rows = [
+    ["Status", calibrated ? "personal" : "default", calibrated ? DOT.green : DOT.yellow],
+    ["Open eye", `EAR ${earCfg.openThreshold.toFixed(2)}`],
+    ["Closed eye", `EAR ≤ ${earCfg.closedThreshold.toFixed(2)}`],
+    ["Head down", `≥ ${headPoseCfg.droopedThreshold.toFixed(1)}°`],
+    ["Head tilt", `≥ ${headPoseCfg.rollDroopedThreshold.toFixed(1)}°`],
+  ];
+  document.getElementById("dashCalibration").innerHTML = rows
+    .map(([label, value, color]) => (color ? dashRow(color, label, value) : dashRow("transparent", label, value, "", "#eee")))
+    .join("");
+}
+
+// The phone layout shows one of Detection, Calibration or Events at a time.
+for (const tab of document.querySelectorAll(".dash-tabs button")) {
+  tab.addEventListener("click", () => {
+    document.getElementById("dashboard").dataset.tab = tab.dataset.tab;
+    for (const other of document.querySelectorAll(".dash-tabs button")) other.setAttribute("aria-selected", String(other === tab));
+  });
+}
+
+// Shows the dashboard only while monitoring, animating the layout change where the browser supports it.
+function setDashboardVisible(visible) {
+  if (dashboard.hidden === !visible) return;
+  const apply = () => {
+    dashboard.hidden = !visible;
+  };
+  if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(apply);
+  else apply();
+}
+
+function resetDashboard() {
+  dashEvents = [];
+  dashLastLevel = 0;
+  document.getElementById("dashSigns").innerHTML = "";
+  document.getElementById("dashChecks").innerHTML = "";
+  document.getElementById("dashCalibration").innerHTML = "";
+  document.getElementById("dashEvents").innerHTML = '<li class="dim">none yet</li>';
+}
+
+// Mirrors LiveMonitor._dashboard in src/watch/live.py.
+function updateDashboard({ escalation, faceFound, left, right, mouth, head, statuses, fps, brightness }) {
+  if (escalation.level !== dashLastLevel) {
+    dashLastLevel = escalation.level;
+    dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
+    dashEvents = dashEvents.slice(0, 50);
+  }
+  if (performance.now() - dashLastDraw < 150) return;
+  dashLastDraw = performance.now();
+
+  const banner = levelBanner(escalation, faceFound);
+  const timer = { 1: `watching ${escalation.windowLeft.toFixed(0)}s`, 2: "alarm on" }[escalation.level] || "";
+  setDashLevel(banner.text, banner.color, escalation.reason, timer, escalation.level === 1);
+
+  const eyes = [left, right].filter(Boolean);
+  const eyesClosed = eyes.length && eyes.reduce((s, r) => s + r.closedness, 0) / eyes.length >= 0.5;
+  const signs = [
+    ["Eyes", statuses.eyes, eyes.length ? (eyesClosed ? "closed" : "open") : null, "closed"],
+    ["Yawn", statuses.mouth, mouth ? (mouth.label === "yawn" ? "yawning" : "normal") : null, "yawning"],
+    ["Head", statuses.head, head ? (head.label === "nodding" ? "drooped" : "upright") : null, "drooped"],
+  ];
+  document.getElementById("dashSigns").innerHTML = signs
+    .map(([label, status, state, concerning]) => {
+      const color = !state ? DOT.gray : status.state === "not_alert" ? DOT.red : state === concerning ? DOT.yellow : DOT.green;
+      return dashRow(color, label, state || "not visible", `${status.closedDuration.toFixed(1)}s`);
+    })
+    .join("");
+
+  const dark = brightness < CONFIG.live.lowLightMean;
+  const checks = [
+    ["Face", faceFound ? "found" : "not found", faceFound ? DOT.green : DOT.red],
+    ["Eyes", faceFound ? `${eyes.length} of 2 readable` : "-", faceFound ? [DOT.red, DOT.yellow, DOT.green][eyes.length] : DOT.gray],
+    ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
+    ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
+    ["FPS", fps.toFixed(0), fps >= 15 ? DOT.green : DOT.yellow],
+    ["GPU", gpu.name, gpu.color],
+  ];
+  document.getElementById("dashChecks").innerHTML = checks.map(([label, value, color]) => dashRow(color, label, value)).join("");
+
+  document.getElementById("dashEvents").innerHTML = dashEvents.length
+    ? dashEvents.map((e) => `<li style="color:${LEVEL_BANNERS[e.level].color}">${e.time} ${LEVEL_BANNERS[e.level].text} ${e.reason}</li>`).join("")
+    : '<li class="dim">none yet</li>';
+}
+
 function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   const lines = [
     left && { text: `left eye: ${left.label} ${Math.round(left.closedness * 100)}% | EAR ${left.ear.toFixed(2)}`, color: left.label === "eyes_opened" ? OPEN_COLOR : CLOSED_COLOR },
@@ -409,7 +643,8 @@ async function main() {
   originalPanel.hidden = true;
   scannedLabel.hidden = true;
   statusEl.textContent = "Loading models...";
-  const { eyeModel, yawnModel, faceLandmarker } = await ensureModels();
+  const { eyeModel, yawnModel, faceLandmarker, vision, baseOptions } = await ensureModels();
+  const zoomLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
 
   statusEl.textContent = "Requesting camera...";
   const stream = await navigator.mediaDevices.getUserMedia({ video: { width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT } });
@@ -419,6 +654,10 @@ async function main() {
   startBtnLabel.textContent = "Stop camera";
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
+  resetDashboard();
+  setDashLevel("STARTING", "#2a2f3a", "Getting the camera ready", "", false);
+  setDashboardVisible(true);
+  placeholder.hidden = true;
   playStartSound();
   displayCanvas.classList.add("capturable");
   captureHint.hidden = false;
@@ -441,36 +680,36 @@ async function main() {
   headPoseCfg = CONFIG.headPose;
   let paused = false;
   let noFaceSince = null;
+  let lastZoomTry = -Infinity;
+  let glareBox = null;
 
   async function runCalibration() {
-    // pause the main render loop so it doesn't fight the calibration overlay for the same canvas
     paused = true;
     stopAlarm();
+    setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${CONFIG.calibration.durationSec}s`, false);
     const calibrated = await calibrate(
       faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
       CONFIG.calibration.droopedOffset, CONFIG.calibration.rollDroopedOffset,
     );
     if (calibrated) {
       earCfg = calibrated.ear;
-      statusEl.textContent = `Calibrated EAR thresholds: open>=${earCfg.openThreshold.toFixed(2)}, closed<=${earCfg.closedThreshold.toFixed(2)}`;
-      if (calibrated.headPose) {
-        headPoseCfg = calibrated.headPose;
-        statusEl.textContent += ` | head-pose: upright<=${headPoseCfg.uprightThreshold.toFixed(1)}, drooped>=${headPoseCfg.droopedThreshold.toFixed(1)}`;
-      }
-    } else {
-      statusEl.textContent = "Calibration failed (no face detected) -- using default EAR/head-pose thresholds.";
+      if (calibrated.headPose) headPoseCfg = calibrated.headPose;
     }
+    // The camera may have been stopped, or a photo captured, while calibrating.
+    if (!cameraActive) return;
+    showCalibration(Boolean(calibrated));
     paused = false;
   }
 
   await runCalibration();
-  muteBtn.style.display = "inline-block";
+  if (!cameraActive) return;
+  muteBtn.hidden = false;
 
-  const eyeSmoother = new RollingMedian(5);
-  const leftEyeSmoother = new RollingMedian(5);
-  const rightEyeSmoother = new RollingMedian(5);
-  const mouthSmoother = new RollingMedian(5);
-  const headSmoother = new RollingMedian(5);
+  const eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const leftEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const rightEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const mouthSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+  const headSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
 
   const eyeMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -485,6 +724,7 @@ async function main() {
     closednessThreshold: CONFIG.yawn.closednessThreshold,
     dipGracePeriod: CONFIG.yawn.dipGracePeriodSec,
   });
+  const escalationMonitor = new EscalationMonitor(CONFIG.escalation);
   const nodMonitor = new AlertnessMonitor({
     closedDurationThreshold: CONFIG.nod.closedDurationThresholdSec,
     perclosWindow: CONFIG.nod.perclosWindowSec,
@@ -493,7 +733,6 @@ async function main() {
     dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
   });
 
-  drawingUtils = new DrawingUtils(ctx);
   let prevTime = performance.now();
 
   async function frame() {
@@ -504,17 +743,24 @@ async function main() {
         return;
       }
       updateMirror();
-      removeGlare(mirrorCanvas, glareCleanCtx);
-      const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
+      // Only glare on the face matters, so skip bright spots elsewhere such as windows.
+      const brightness = removeGlare(mirrorCanvas, glareCleanCtx, true, glareBox);
+      let result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
+      // Retry faces the tracker misses, such as one far from the camera.
+      if (!result.faceLandmarks.length && performance.now() - lastZoomTry > 500) {
+        lastZoomTry = performance.now();
+        result = (await detectZoomed(zoomLandmarker, glareCleanCanvas)) || result;
+      }
       const faceFound = result.faceLandmarks.length > 0;
+      glareBox = faceFound ? faceBox(result.faceLandmarks[0], canvas.width, canvas.height) : null;
 
       if (!faceFound) {
         if (noFaceSince === null) noFaceSince = performance.now();
       } else if (noFaceSince !== null) {
-        // a face reappearing after a real gap likely means a new driver, so recalibrate for them automatically
+        // A face returning after a real gap is likely a new driver, unless a warning is being held.
         const gap = performance.now() - noFaceSince;
         noFaceSince = null;
-        if (gap >= NO_FACE_RECALIBRATE_GAP_MS) {
+        if (gap >= CONFIG.live.recalibrateGapSec * 1000 && escalationMonitor.level === 0) {
           await runCalibration();
           requestAnimationFrame(frame);
           return;
@@ -529,63 +775,36 @@ async function main() {
         const lm = result.faceLandmarks[0];
         const w = canvas.width, h = canvas.height;
 
-        const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
-        const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-        const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
-        const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
-        const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-        // drop a region individually (not just when the crop geometry fails, but also when the crop is too
-        // flat/featureless to be real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame
-        const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
-        const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
-        const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
-
-        if (leftBox || rightBox) {
-          // run all CNN calls concurrently instead of awaiting each GPU round-trip in turn
-          const calls = [];
-          if (leftBox) calls.push(drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm, leftEyeSmoother));
-          if (rightBox) calls.push(drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm, rightEyeSmoother));
-          if (mouthBox) calls.push(drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm));
-          const results = await Promise.all(calls);
-          let idx = 0;
-          if (leftBox) leftResult = results[idx++];
-          if (rightBox) rightResult = results[idx++];
-          if (mouthBox) mouthResult = results[idx++];
-
-          const eyeReadings = [leftResult, rightResult].filter(Boolean);
-          // average both eyes so one drooping eyelid still raises the score; if neither eye is readable
-          // (e.g. an opaque tinted visor), report no reading rather than fabricating one
-          eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
-          mouthOpenness = mouthResult ? mouthResult.openness : null;
-          if (result.facialTransformationMatrixes.length) {
-            const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
-            headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
-            headDroop = headResult?.droop ?? null;
-          }
+        const regions = readableRegions(lm, w, h);
+        const predictions = await predictRegions(regions, eyeModel, yawnModel);
+        leftResult = regions.left && drawEye("left", regions.left.box, predictions.left, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), earCfg, lm, leftEyeSmoother);
+        rightResult = regions.right && drawEye("right", regions.right.box, predictions.right, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), earCfg, lm, rightEyeSmoother);
+        mouthResult = regions.mouth && drawMouth(predictions.mouth, mouthAspectRatio(lm, w, h), lm);
+        eyeClosedness = eyeClosednessOf([leftResult, rightResult]);
+        mouthOpenness = mouthResult ? mouthResult.openness : null;
+        if (result.facialTransformationMatrixes.length) {
+          const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+          headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
+          headDroop = headResult?.droop ?? null;
         }
       }
-      drawStatusPanel(leftResult, rightResult, mouthResult, headResult);
-
+      // A frame still in flight when the camera stops must not overwrite the idle dashboard or start the alarm.
+      if (!cameraActive) return;
       const now = performance.now() / 1000;
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
 
-      let overallState;
-      if (eyeStatus.state === "no_face") overallState = "no_face";
-      else if ([eyeStatus.state, yawnStatus.state, nodStatus.state].includes("not_alert")) overallState = "not_alert";
-      else overallState = "alert";
-
-      if (overallState === "not_alert") startAlarm();
+      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, faceFound, now);
+      if (escalation.level === 2) startAlarm();
       else stopAlarm();
-
-      drawBanner(overallState, eyeStatus, yawnStatus, nodStatus);
 
       const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
       prevTime = now;
-      ctx.fillStyle = "#00ffff";
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillText(`FPS: ${fps.toFixed(1)}`, 20, canvas.height - 20);
+      updateDashboard({
+        escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult,
+        statuses: { eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, fps, brightness,
+      });
 
       if (!cameraActive) return;
       displayCtx.drawImage(canvas, 0, 0);
@@ -607,9 +826,14 @@ function drawSnapshotBanner(state) {
   displayCtx.fillText(BANNER_TEXT[state], 20, 34);
 }
 
-async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
+const zoomCanvas = document.createElement("canvas");
+const zoomCtx = zoomCanvas.getContext("2d");
+
+// Mirrors FaceTracker._landmarks in src/watch/face.py.
+async function detectZoomed(landmarker, source) {
+  const w = source.width, h = source.height;
   const blazefaceModel = await ensureBlazeface();
-  const faces = await blazefaceModel.estimateFaces(mirrorCanvas, false);
+  const faces = await blazefaceModel.estimateFaces(source, false);
   if (!faces.length) return null;
 
   const [x1, y1] = faces[0].topLeft;
@@ -622,17 +846,14 @@ async function tryCropAndRetry(uploadFaceLandmarker, w, h) {
   const cropH = Math.min(h, y2 + boxH * pad) - cropY;
   if (cropW <= 0 || cropH <= 0) return null;
 
-  const cropped = document.createElement("canvas");
-  cropped.width = w;
-  cropped.height = h;
-  cropped.getContext("2d").drawImage(mirrorCanvas, cropX, cropY, cropW, cropH, 0, 0, w, h);
+  zoomCanvas.width = 256;
+  zoomCanvas.height = Math.round((256 * cropH) / cropW);
+  zoomCtx.drawImage(source, cropX, cropY, cropW, cropH, 0, 0, zoomCanvas.width, zoomCanvas.height);
 
-  const retryResult = uploadFaceLandmarker.detect(cropped);
-  if (!retryResult.faceLandmarks.length) return null;
-
-  mirrorCtx.clearRect(0, 0, w, h);
-  mirrorCtx.drawImage(cropped, 0, 0);
-  return retryResult;
+  const zoomed = landmarker.detect(zoomCanvas);
+  if (!zoomed.faceLandmarks.length) return null;
+  const toFrame = (p) => ({ x: (cropX + p.x * cropW) / w, y: (cropY + p.y * cropH) / h, z: (p.z * cropW) / w });
+  return { ...zoomed, faceLandmarks: zoomed.faceLandmarks.map((face) => face.map(toFrame)) };
 }
 
 function blitUnmirrored() {
@@ -681,6 +902,9 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   originalCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
   originalPanel.hidden = false;
   scannedLabel.hidden = false;
+  placeholder.hidden = true;
+  // A photo is not monitored over time, so the dashboard has nothing to show.
+  setDashboardVisible(false);
 
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);
@@ -693,23 +917,15 @@ async function handleImageUpload(file, alreadyMirrored = false) {
     mirrorCtx.restore();
   }
   ctx.drawImage(mirrorCanvas, 0, 0);
-  // no glare removal for a single uploaded photo (matches predict.py's scope) -- just keep this canvas valid for drawEye/drawMouth's crop source
-  glareCleanCanvas.width = mirrorCanvas.width;
-  glareCleanCanvas.height = mirrorCanvas.height;
-  glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
+  // Uploaded photos skip glare removal, matching predict.py.
+  removeGlare(mirrorCanvas, glareCleanCtx, false);
 
   statusEl.textContent = "";
-  let result = uploadFaceLandmarker.detect(mirrorCanvas);
+  let result = uploadFaceLandmarker.detect(glareCleanCanvas);
   if (!result.faceLandmarks.length) {
     statusEl.textContent = "No face found directly -- retrying with a coarser detector...";
-    const retried = await tryCropAndRetry(uploadFaceLandmarker, w, h);
+    result = (await detectZoomed(uploadFaceLandmarker, glareCleanCanvas)) || result;
     statusEl.textContent = "";
-    if (retried) {
-      result = retried;
-      ctx.drawImage(mirrorCanvas, 0, 0);
-      glareCleanCtx.clearRect(0, 0, glareCleanCanvas.width, glareCleanCanvas.height);
-      glareCleanCtx.drawImage(mirrorCanvas, 0, 0);
-    }
   }
 
   if (!result.faceLandmarks.length) {
@@ -719,33 +935,17 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   }
 
   const lm = result.faceLandmarks[0];
-  const leftEar = eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS);
-  const rightEar = eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS);
-  const leftBoxRaw = boxFromLandmarks(lm, LEFT_EYE_IDS, w, h, 0.15, true);
-  const rightBoxRaw = boxFromLandmarks(lm, RIGHT_EYE_IDS, w, h, 0.15, true);
-  const mouthBoxRaw = boxFromLandmarks(lm, MOUTH_IDS, w, h, 0.3);
-  // drop a region individually (not just when the crop geometry fails, but also when the crop is too
-  // flat/featureless to be real detail -- e.g. an opaque tinted visor) rather than discarding the whole frame
-  const leftBox = leftBoxRaw && !isLowDetail(leftBoxRaw) ? leftBoxRaw : null;
-  const rightBox = rightBoxRaw && !isLowDetail(rightBoxRaw) ? rightBoxRaw : null;
-  const mouthBox = mouthBoxRaw && !isLowDetail(mouthBoxRaw) ? mouthBoxRaw : null;
-
-  if (!leftBox && !rightBox) {
-    finalBlit();
-    drawSnapshotBanner("no_face");
-    return;
-  }
-
-  const left = leftBox ? await drawEye("left", leftBox, leftEar, eyeModel, earCfg, lm) : null;
-  const right = rightBox ? await drawEye("right", rightBox, rightEar, eyeModel, earCfg, lm) : null;
-  const mouth = mouthBox ? await drawMouth(mouthBox, mouthAspectRatio(lm, w, h), yawnModel, lm) : null;
+  const regions = readableRegions(lm, w, h);
+  const predictions = await predictRegions(regions, eyeModel, yawnModel);
+  const left = regions.left ? drawEye("left", regions.left.box, predictions.left, eyeAspectRatio(lm, w, h, LEFT_EYE_EAR_POINTS), earCfg, lm) : null;
+  const right = regions.right ? drawEye("right", regions.right.box, predictions.right, eyeAspectRatio(lm, w, h, RIGHT_EYE_EAR_POINTS), earCfg, lm) : null;
+  const mouth = regions.mouth ? drawMouth(predictions.mouth, mouthAspectRatio(lm, w, h), lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
     const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
     head = headPoseStatus(headPose.pitch, headPose.roll, lm);
   }
-  const eyeReadings = [left, right].filter(Boolean);
-  const eyeClosedness = eyeReadings.length ? eyeReadings.reduce((s, r) => s + r.closedness, 0) / eyeReadings.length : null;
+  const eyeClosedness = eyeClosednessOf([left, right]);
   const notAlert =
     (eyeClosedness !== null && eyeClosedness >= CONFIG.alertness.closednessThreshold) ||
     (mouth !== null && mouth.openness >= CONFIG.yawn.closednessThreshold) ||
@@ -846,9 +1046,12 @@ function stopCamera() {
   captureHint.hidden = true;
   stopAlarm();
   playStopSound();
-  muteBtn.style.display = "none";
+  muteBtn.hidden = true;
   cameraIcon.style.display = "";
   liveDot.hidden = true;
+  resetDashboard();
+  setDashboardVisible(false);
+  placeholder.hidden = false;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
   uploadBtn.classList.remove("disabled");

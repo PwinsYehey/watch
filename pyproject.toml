@@ -3,10 +3,34 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "frames"
-version = "0.1.0"
-description = "FRAMES - Facial Recognition & Alertness Monitoring Engine System"
-requires-python = ">=3.10"
+name = "watch"
+version = "0.2.0"
+description = "WATCH - Wakefulness Assessment through Tracking of Cues & Head"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "tensorflow>=2.16,<2.19",
+    "mediapipe==0.10.14",
+    "opencv-python>=4.9",
+    "numpy>=1.26",
+    "pillow>=10.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+train = [
+    "tensorflow[and-cuda]>=2.16,<2.19; sys_platform == 'linux'",
+    "pandas>=2.2",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+    "kagglehub>=0.3",
+    "unrar-cffi>=0.2",
+]
+dev = ["pytest>=8.0", "pandas>=2.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["watch*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Type google._upb:DeprecationWarning"]
