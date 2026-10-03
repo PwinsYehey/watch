@@ -13,6 +13,7 @@ const originalPanel = document.getElementById("originalPanel");
 const scannedLabel = document.getElementById("scannedLabel");
 const captureHint = document.getElementById("captureHint");
 const flashOverlay = document.getElementById("flashOverlay");
+const placeholder = document.getElementById("placeholder");
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
@@ -455,7 +456,6 @@ function levelBanner(escalation, faceFound) {
   return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
 }
 
-const dashboard = document.getElementById("dashboard");
 const dashLevel = document.getElementById("dashLevel");
 const DOT = { green: "#00c800", yellow: "#ffd700", red: "#dc0000", gray: "#787878" };
 let dashEvents = [];
@@ -500,6 +500,10 @@ function showCalibration(calibrated) {
   document.getElementById("dashCalibration").innerHTML = rows
     .map(([label, value, color]) => (color ? dashRow(color, label, value) : dashRow("transparent", label, value, "", "#eee")))
     .join("");
+}
+
+function showIdle() {
+  setDashLevel("IDLE", "#2a2f3a", "Start the camera to begin monitoring", "", false);
 }
 
 function resetDashboard() {
@@ -636,7 +640,7 @@ async function main() {
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
   resetDashboard();
-  dashboard.hidden = false;
+  placeholder.hidden = true;
   playStartSound();
   displayCanvas.classList.add("capturable");
   captureHint.hidden = false;
@@ -679,7 +683,7 @@ async function main() {
   }
 
   await runCalibration();
-  muteBtn.style.display = "inline-block";
+  muteBtn.hidden = false;
 
   const eyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
   const leftEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
@@ -876,6 +880,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   originalCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
   originalPanel.hidden = false;
   scannedLabel.hidden = false;
+  placeholder.hidden = true;
 
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);
@@ -1017,10 +1022,12 @@ function stopCamera() {
   captureHint.hidden = true;
   stopAlarm();
   playStopSound();
-  muteBtn.style.display = "none";
+  muteBtn.hidden = true;
   cameraIcon.style.display = "";
   liveDot.hidden = true;
-  dashboard.hidden = true;
+  resetDashboard();
+  showIdle();
+  placeholder.hidden = false;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
   uploadBtn.classList.remove("disabled");
