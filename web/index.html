@@ -84,7 +84,7 @@
     .dash-level { padding: 10px 12px; border-radius: 8px; background: #2a2f3a; color: #fff; transition: background 0.2s; }
     .dash-level-name { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
     .dash-level-timer { font-size: 12px; opacity: 0.85; min-height: 16px; }
-    .dash-rows { display: grid; grid-template-columns: 10px 80px 1fr auto; gap: 5px 8px; align-items: center; }
+    .dash-rows { display: grid; grid-template-columns: 10px 88px 1fr auto; gap: 5px 8px; align-items: center; }
     .dash-rows:empty::before { content: "—"; color: var(--muted); grid-column: 1 / -1; }
     .dot { width: 8px; height: 8px; border-radius: 50%; }
     .dash-events { list-style: none; padding: 0; margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -108,7 +108,7 @@
     @media (max-width: 560px) {
       .app-header { padding: 8px 14px; }
       body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
-      .layout { flex: 1; width: 100%; }
+      .layout { flex: 1; width: 100%; align-content: start; }
       .layout:has(#dashboard[hidden]) { align-content: center; }
       .brand-sub { display: none; }
       .layout { margin: 8px auto; padding: 0 8px; gap: 8px; }
@@ -140,6 +140,7 @@
       #dashboard[data-tab="detection"] [data-section="detection"],
       #dashboard[data-tab="calibration"] [data-section="calibration"],
       #dashboard[data-tab="events"] [data-section="events"] { display: flex; }
+      #dashboard[data-tab="live"] [data-section="live"] { display: block; }
       footer { display: none; }
     }
   </style>
@@ -224,10 +225,15 @@
           <div class="dash-label">Recent events</div>
           <div class="dash-events-wrap"><ol class="dash-events" id="dashEvents"><li class="dim">none yet</li></ol></div>
         </section>
+        <section class="dash-section dash-tab" data-section="live">
+          <div class="dash-label">Live values</div>
+          <div class="dash-rows" id="dashLive"></div>
+        </section>
       </div>
       <div class="dash-tabs" role="tablist">
         <button role="tab" data-tab="detection" aria-selected="true">Detection</button>
         <button role="tab" data-tab="calibration" aria-selected="false">Calibration</button>
+        <button role="tab" data-tab="live" aria-selected="false">Live</button>
         <button role="tab" data-tab="events" aria-selected="false">Events</button>
       </div>
     </aside>
@@ -241,6 +247,6 @@
   <script src="config.js?v=22"></script>
   <script src="geometry.js?v=16"></script>
   <script src="alertness.js?v=12"></script>
-  <script type="module" src="app.js?v=59"></script>
+  <script type="module" src="app.js?v=60"></script>
 </body>
 </html>

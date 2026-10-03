@@ -525,6 +525,7 @@ function resetDashboard() {
   document.getElementById("dashSigns").innerHTML = "";
   document.getElementById("dashChecks").innerHTML = "";
   document.getElementById("dashCalibration").innerHTML = "";
+  document.getElementById("dashLive").innerHTML = "";
   document.getElementById("dashEvents").innerHTML = '<li class="dim">none yet</li>';
 }
 
@@ -566,6 +567,19 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
     ["GPU", gpu.name, gpu.color],
   ];
   document.getElementById("dashChecks").innerHTML = checks.map(([label, value, color]) => dashRow(color, label, value)).join("");
+
+  // What is being measured right now, to compare with the calibrated limits; red once past them.
+  const ears = [left, right].filter(Boolean).map((r) => r.ear);
+  const ear = ears.length ? ears.reduce((s, v) => s + v, 0) / ears.length : null;
+  const live = [
+    ["Eyes (EAR)", ear === null ? "-" : ear.toFixed(2), ear !== null && ear <= earCfg.closedThreshold],
+    ["Mouth (MAR)", mouth ? mouth.mar.toFixed(2) : "-", mouth?.label === "yawn"],
+    ["Head down", head ? `${head.pitch.toFixed(1)}°` : "-", head && head.pitch >= headPoseCfg.droopedThreshold],
+    ["Head tilt", head ? `${head.roll.toFixed(1)}°` : "-", head && head.roll >= headPoseCfg.rollDroopedThreshold],
+  ];
+  document.getElementById("dashLive").innerHTML = live
+    .map(([label, value, past]) => dashRow("transparent", label, value, "", past ? DOT.red : value === "-" ? "#888" : "#eee"))
+    .join("");
 
   document.getElementById("dashEvents").innerHTML = dashEvents.length
     ? dashEvents.map((e) => `<li style="color:${LEVEL_BANNERS[e.level].color}">${e.time} ${LEVEL_BANNERS[e.level].text} ${e.reason}</li>`).join("")

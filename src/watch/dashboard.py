@@ -93,7 +93,7 @@ class DashboardView:
         glyphs, left, top = cached
         self._canvas.paste(glyphs, (int(xy[0] + left), int(xy[1] + top)), glyphs)
 
-    def render(self, frame_bgr, level: Level, signs, checks, calibration, events, live: bool, muted: bool) -> np.ndarray:
+    def render(self, frame_bgr, level: Level, signs, checks, calibration, events, live: bool, muted: bool, readings=()) -> np.ndarray:
         """Returns the whole window as a BGR image."""
         image = self._canvas = self._base.copy()
         draw = ImageDraw.Draw(image)
@@ -110,8 +110,14 @@ class DashboardView:
         y = self._level(draw, x, y, column, level)
         for title, rows in (("Signs", signs), ("Detection", checks), ("Calibration", calibration)):
             y = self._divider(draw, x, y, column)
+            section_top = y
             y = self._rows(draw, x, y, column, title, rows)
-        self._events(draw, x + column + COLUMN_GAP, card_top + 14, column, card_bottom - 14, events)
+        # Live values sit at the bottom of the right column, beside Calibration; recent events fill the space above.
+        right = x + column + COLUMN_GAP
+        live_top = section_top
+        self._events(draw, right, card_top + 14, column, live_top - 22, events)
+        self._divider(draw, right, live_top - 22, column)
+        self._rows(draw, right, live_top, column, "Live values", readings)
         return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
     def _header(self, draw, width):
@@ -176,7 +182,7 @@ class DashboardView:
             if row.color:
                 draw.ellipse((x + 1, y + 6, x + 9, y + 14), row.color)
             self._text((x + 18, y), row.label, TEXT, "body")
-            self._text((x + 100, y), row.value, row.value_color, "body")
+            self._text((x + 112, y), row.value, row.value_color, "body")
             if row.extra:
                 self._text((x + width, y), row.extra, MUTED, "body", "ra")
             y += ROW

@@ -125,7 +125,7 @@ class LiveMonitor:
                     rolls.append(regions.roll)
             name, color = ui.LEVELS["calibrating"]
             level = ui.Level(name, color, "look at the camera normally", f"{remaining:.1f}s left")
-            cv2.imshow(WINDOW, self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted))
+            cv2.imshow(WINDOW, self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[]))
             cv2.waitKey(1)
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
@@ -198,8 +198,8 @@ class LiveMonitor:
             for i in (10, 152):
                 cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
 
-        level, signs, checks, calibration = self._dashboard(regions, cues, escalation, statuses, fps, brightness)
-        return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted)
+        level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness)
+        return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings)
 
     def _dashboard(self, regions, cues, escalation, statuses, fps, brightness):
         """The dashboard contents, mirroring updateDashboard and showCalibration in web/app.js."""
@@ -240,7 +240,16 @@ class LiveMonitor:
             ui.Row(None, "Head down", f"\u2265 {self.head['drooped_threshold']:.1f}\u00b0"),
             ui.Row(None, "Head tilt", f"\u2265 {self.head['roll_drooped_threshold']:.1f}\u00b0"),
         ]
-        return level, signs, checks, calibration
+        # What is being measured right now, to compare with the calibrated limits; red once past them.
+        ear = np.mean([cue["ratio"] for cue in eyes]) if eyes else None
+        readings = [
+            ("Eyes (EAR)", "-" if ear is None else f"{ear:.2f}", ear is not None and ear <= self.ear["closed_threshold"]),
+            ("Mouth (MAR)", f"{mouth['ratio']:.2f}" if mouth else "-", bool(mouth) and mouth["label"] == "yawn"),
+            ("Head down", f"{head['pitch']:.1f}\u00b0" if head else "-", bool(head) and head["pitch"] >= self.head["drooped_threshold"]),
+            ("Head tilt", f"{head['roll']:.1f}\u00b0" if head else "-", bool(head) and head["roll"] >= self.head["roll_drooped_threshold"]),
+        ]
+        readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
+        return level, signs, checks, calibration, readings
 
     def _event_lines(self):
         """Recent level changes, newest first."""
