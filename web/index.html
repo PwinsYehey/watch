@@ -26,7 +26,17 @@
     .brand-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .layout { --video-width: min(calc((100vh - 176px) * 4 / 3 + 26px), 980px); max-width: 1600px; margin: 16px auto; padding: 0 20px; display: grid; grid-template-columns: minmax(0, var(--video-width)) minmax(300px, 1fr); gap: 16px; align-items: stretch; }
-    .layout:has(#dashboard[hidden]) { grid-template-columns: minmax(0, calc((100vh - 200px) * 8 / 3 + 40px)); justify-content: center; }
+    .layout:has(#dashboard[hidden]) { grid-template-columns: minmax(0, var(--video-width)); justify-content: center; }
+    .layout:has(#dashboard[hidden]):has(#originalPanel:not([hidden])) { grid-template-columns: minmax(0, calc((100vh - 200px) * 8 / 3 + 40px)); }
+
+    /* The dashboard slides in from the right while the video card glides aside. */
+    .viewer { view-transition-name: viewer; }
+    .dashboard { view-transition-name: dashboard; }
+    ::view-transition-group(*) { animation-duration: 0.4s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    ::view-transition-new(dashboard):only-child { animation: dash-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    ::view-transition-old(dashboard):only-child { animation: dash-out 0.25s ease-in both; }
+    @keyframes dash-in { from { opacity: 0; transform: translateX(24px); } }
+    @keyframes dash-out { to { opacity: 0; transform: translateX(24px); } }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
     .viewer { padding: 12px; }
     .viewer-grid { display: grid; gap: 12px; }
@@ -89,7 +99,9 @@
       .dash-level { padding: 8px 12px; }
     }
     @media (max-width: 900px) {
-      .layout, .layout:has(#dashboard[hidden]) { grid-template-columns: 1fr; }
+      .layout, .layout:has(#dashboard[hidden]), .layout:has(#dashboard[hidden]):has(#originalPanel:not([hidden])) { grid-template-columns: 1fr; }
+      @keyframes dash-in { from { opacity: 0; transform: translateY(16px); } }
+      @keyframes dash-out { to { opacity: 0; transform: translateY(16px); } }
       .credits { display: none; }
       footer { display: block; }
     }
@@ -181,13 +193,13 @@
       <div id="status"></div>
     </section>
 
-    <aside class="card dashboard" id="dashboard" data-tab="detection">
+    <aside class="card dashboard" id="dashboard" data-tab="detection" hidden>
       <div class="dash-group">
         <section class="dash-section" data-section="level">
           <div class="dash-label">Alert level</div>
           <div class="dash-level" id="dashLevel">
-            <div class="dash-level-name" id="dashLevelName">IDLE</div>
-            <div id="dashLevelReason">Start the camera to begin monitoring</div>
+            <div class="dash-level-name" id="dashLevelName">STARTING</div>
+            <div id="dashLevelReason">Getting the camera ready</div>
             <div class="dash-level-timer" id="dashLevelTimer"></div>
           </div>
         </section>
@@ -226,6 +238,6 @@
   <script src="config.js?v=19"></script>
   <script src="geometry.js?v=16"></script>
   <script src="alertness.js?v=11"></script>
-  <script type="module" src="app.js?v=56"></script>
+  <script type="module" src="app.js?v=57"></script>
 </body>
 </html>

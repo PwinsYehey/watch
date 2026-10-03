@@ -511,8 +511,14 @@ for (const tab of document.querySelectorAll(".dash-tabs button")) {
   });
 }
 
-function showIdle() {
-  setDashLevel("IDLE", "#2a2f3a", "Start the camera to begin monitoring", "", false);
+// Shows the dashboard only while monitoring, animating the layout change where the browser supports it.
+function setDashboardVisible(visible) {
+  if (dashboard.hidden === !visible) return;
+  const apply = () => {
+    dashboard.hidden = !visible;
+  };
+  if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(apply);
+  else apply();
 }
 
 function resetDashboard() {
@@ -649,7 +655,8 @@ async function main() {
   cameraIcon.style.display = "none";
   liveDot.hidden = false;
   resetDashboard();
-  dashboard.hidden = false;
+  setDashLevel("STARTING", "#2a2f3a", "Getting the camera ready", "", false);
+  setDashboardVisible(true);
   placeholder.hidden = true;
   playStartSound();
   displayCanvas.classList.add("capturable");
@@ -897,7 +904,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   scannedLabel.hidden = false;
   placeholder.hidden = true;
   // A photo is not monitored over time, so the dashboard has nothing to show.
-  dashboard.hidden = true;
+  setDashboardVisible(false);
 
   mirrorCtx.fillStyle = "#000";
   mirrorCtx.fillRect(0, 0, w, h);
@@ -1043,7 +1050,7 @@ function stopCamera() {
   cameraIcon.style.display = "";
   liveDot.hidden = true;
   resetDashboard();
-  showIdle();
+  setDashboardVisible(false);
   placeholder.hidden = false;
   startBtnLabel.textContent = "Use camera";
   imageUpload.disabled = false;
