@@ -1,128 +1,114 @@
-# FRAMES - Facial Recognition & Alertness Monitoring Engine System central config.
+# WATCH - Wakefulness Assessment through Tracking of Cues & Head.
 
-project:
-  name: frames
-  seed: 42
+seed: 42
 
 paths:
   raw_dir: data/raw
   splits_dir: data/splits
   models_dir: models
   results_dir: results
+  web_dir: web
 
+# Raw image folders per model, relative to paths.raw_dir.
 datasets:
-  # Each dataset gets its own raw subfolder under paths.raw_dir.
-  mrl_eye:
-    raw_subdir: eye/mrl_eye
-    enabled: true
-  cew:
-    raw_subdir: eye/cew
-    enabled: true
-  nthu_eye:
-    # Real subject ids from NTHU-DDD, extracted via cli/eye/extract_nthu.py; adds glasses-wearing subject diversity MRL/CEW lack.
-    raw_subdir: eye/nthu_eye
-    enabled: true
-
-yawn_dataset:
-  yawdd:
-    # Real subject ids from the YawDD Mirror set, extracted via cli/yawn/extract_yawdd.py.
-    raw_subdir: yawn/yawdd
-    enabled: true
+  eye:
+    mrl_eye: eye/mrl_eye
+    cew: eye/cew
+    nthu_eye: eye/nthu_eye
+  yawn:
+    yawdd: yawn/yawdd
 
 split:
-  # Split is done by subject/session id, never by individual image.
-  ratios:
-    train: 0.70
-    val: 0.20
-    test: 0.10
-  group_by: subject_id
+  ratios: {train: 0.70, val: 0.20, test: 0.10}
+  # NTHU has only 4 subjects, so pin two of them out of train.
+  force: {"nthu_eye::002": test, "nthu_eye::006": val}
 
-preprocessing:
-  image_size: [64, 64]
-  grayscale: false
+image_size: [64, 64]
 
-model:
-  # Ground truth is eye state (eyes_closed/eyes_opened), not alert/not_alert -- see alertness section below.
-  architecture: custom_cnn   # one of: custom_cnn, mobilenetv2
-  dropout_rate: 0.5
-  dense_units: 128
-  learning_rate: 0.0001
-  num_classes: 2
-  class_names: [eyes_closed, eyes_opened]
+models:
+  eye:
+    class_names: [eyes_closed, eyes_opened]
+    positive_class: eyes_closed
+    grayscale: true
+    architecture: custom_cnn
+    dropout_rate: 0.5
+    dense_units: 128
+    learning_rate: 0.0001
+    batch_size: 64
+    epochs: 30
+    early_stopping_patience: 5
+    reduce_lr_patience: 2
+  yawn:
+    class_names: [no_yawn, yawn]
+    positive_class: yawn
+    grayscale: false
+    architecture: tiny_cnn
+    dropout_rate: 0.5
+    dense_units: 64
+    learning_rate: 0.001
+    batch_size: 32
+    epochs: 80
+    early_stopping_patience: 8
+    reduce_lr_patience: 3
 
-training:
-  batch_size: 64
-  epochs: 30
-  early_stopping_patience: 5
-  reduce_lr_patience: 2
-
-yawn_model:
-  architecture: tiny_cnn
-  dropout_rate: 0.5
-  dense_units: 64
-  learning_rate: 0.0001
-  num_classes: 2
-  class_names: [no_yawn, yawn]
-
-yawn_training:
-  batch_size: 32
-  epochs: 80
-  early_stopping_patience: 8
-  reduce_lr_patience: 3
-
-grid_search:
+sweep:
   architectures: [custom_cnn, mobilenetv2]
   dropout_rates: [0.3, 0.5]
   dense_units: [64, 128]
   learning_rates: [0.0001, 0.00001]
-  epochs_per_run: 15
+  epochs: 15
 
+extraction:
+  nthu: {frame_stride: 3, max_frames_per_group: 150}
+  yawdd:
+    max_frames_per_video: 40
+    frame_stride: {normal: 10, talking: 10, yawning: 3}
+
+# Per-cue alert logic: not_alert after a sustained streak or a high average over the window.
 alertness:
-  # Turns per-frame eye-closedness into a live alert/not_alert judgement.
   closed_duration_threshold_sec: 1.5
   perclos_window_sec: 5.0
   perclos_threshold: 0.75
   closedness_threshold: 0.85
 
-ear:
-  # Fallback thresholds used only if live per-user calibration fails.
-  open_threshold: 0.35
-  closed_threshold: 0.10
-
-calibration:
-  # live.py measures each user's own open-eye EAR and neutral head pose at startup, so thresholds fit
-  # their eye shape and resting posture (e.g. a helmet's weight/fit can shift head angle) rather than
-  # the population-average defaults below.
-  duration_sec: 4.0
-  closed_offset: 0.10
-  drooped_offset: 8.0
-  roll_drooped_offset: 30.0
-
-mar:
-  # Mouth Aspect Ratio thresholds -- 0.6 also marks the yawn cutoff used when filtering YawDD frames.
-  closed_threshold: 0.3
-  open_threshold: 0.6
-
 yawn:
-  # Sustained wide-mouth duration counts as yawning, unlike a quick talk/laugh.
   closed_duration_threshold_sec: 3.0
   perclos_window_sec: 8.0
   perclos_threshold: 0.8
   closedness_threshold: 0.5
   dip_grace_period_sec: 0.5
 
-head_pose:
-  # Forward-nod pitch thresholds, calibrated from observed neutral (~5deg) and nodding (~20deg) values.
-  upright_threshold: 8
-  drooped_threshold: 20
-  # Sideways-tilt roll thresholds -- drooped is set near where the head nearly touches the shoulder.
-  roll_upright_threshold: 15
-  roll_drooped_threshold: 45
-
 nod:
-  # Sustained head-droop duration counts as nodding off; no dip_grace_period, unlike yawn.
   closed_duration_threshold_sec: 2.0
   perclos_window_sec: 6.0
   perclos_threshold: 0.6
   closedness_threshold: 0.5
   dip_grace_period_sec: 0.0
+
+# Defaults used until per-user calibration replaces them.
+ear:
+  open_threshold: 0.35
+  closed_threshold: 0.10
+
+mar:
+  closed_threshold: 0.3
+  open_threshold: 0.6
+
+head_pose:
+  upright_threshold: 8
+  drooped_threshold: 20
+  roll_upright_threshold: 15
+  roll_drooped_threshold: 45
+
+calibration:
+  duration_sec: 4.0
+  closed_offset: 0.10
+  drooped_offset: 8.0
+  roll_drooped_offset: 30.0
+
+live:
+  min_cnn_confidence: 0.65
+  ear_glare_tolerance: 0.15
+  low_detail_std: 12.0
+  recalibrate_gap_sec: 3.0
+  smoothing_window: 5
