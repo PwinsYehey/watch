@@ -629,11 +629,9 @@ async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffse
         rollSamples.push(headPose.roll);
       }
     }
-    const remaining = durationSec - (performance.now() - start) / 1000;
-    ctx.fillStyle = "#00c8ff";
-    ctx.font = "bold 14px sans-serif";
-    ctx.fillText("Calibrating -- look at the camera normally", 20, 40);
-    ctx.fillText(`${remaining.toFixed(1)}s`, 20, 80);
+    // The countdown lives in the dashboard, matching the live monitor.
+    const remaining = Math.max(0, durationSec - (performance.now() - start) / 1000);
+    setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${remaining.toFixed(1)}s left`, false);
     displayCtx.drawImage(canvas, 0, 0);
     await new Promise((r) => requestAnimationFrame(r));
   }
@@ -705,7 +703,7 @@ async function main() {
   async function runCalibration() {
     paused = true;
     stopAlarm();
-    setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${CONFIG.calibration.durationSec}s`, false);
+    setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${CONFIG.calibration.durationSec.toFixed(1)}s left`, false);
     const calibrated = await calibrate(
       faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
       CONFIG.calibration.droopedOffset, CONFIG.calibration.rollDroopedOffset,
