@@ -47,6 +47,14 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
 
+## Web demo performance
+
+Low FPS on a laptop with two GPUs usually means the browser is on the built-in one (the dashboard's GPU row is yellow). To use the dedicated GPU on Windows:
+
+1. **Settings → System → Display → Graphics → Microsoft Edge → Options → High performance → Save.**
+2. In `edge://settings/system`, turn on **Use graphics acceleration when available**.
+3. Close every Edge window and reopen it. The GPU row should turn green.
+
 ## Architecture
 
 The full flow from camera input to alerts, display and reports is in [docs/architecture-flowchart.png](docs/architecture-flowchart.png). Its source, [docs/architecture-flowchart.mmd](docs/architecture-flowchart.mmd), is a [Mermaid](https://mermaid.js.org) flowchart that can be edited and re-rendered at [mermaid.live](https://mermaid.live).
