@@ -29,15 +29,33 @@ def test_samples_are_throttled_but_keep_events():
     assert log.samples[-1].event == "Warning: yawning"
 
 
-def test_summary_counts_alerts_and_time_in_critical():
+def test_summary_counts_alerts():
     summary = _session().summary()
     assert "duration 0:12" in summary and "warnings 1" in summary and "critical alerts 1" in summary
-    assert "time in critical 0:02" in summary
+
+
+def test_time_in_states():
+    seconds = _session().time_in_states()
+    assert seconds["Critical"] == 1.75 and seconds["Normal"] == 5.0 and seconds["Camera lost"] == 0.0
+
+
+def test_log_lists_each_change_with_its_reason():
+    log = _session()
+    log.event("Recalibrated")
+    log.add(113.0, "Critical")
+    assert [(status, detail) for _, _, status, detail in log.log()] == [
+        ("CALIBRATING", ""),
+        ("NORMAL", ""),
+        ("WARNING", "eyes closed"),
+        ("CRITICAL", "eyes closed too long"),
+        ("RECALIBRATED", ""),
+    ]
 
 
 def test_save_writes_report_and_csv(tmp_path):
     png, csv_path = _session().save(tmp_path)
     assert png.stat().st_size > 10_000
     rows = list(csv.DictReader(csv_path.open()))
-    assert rows[0]["state"] == "Calibrating" and rows[-1]["state"] == "Critical"
-    assert any(row["event"] == "Warning: eyes closed" for row in rows)
+    assert list(rows[0]) == ["time", "elapsed", "status", "detail"]
+    assert [row["status"] for row in rows] == ["CALIBRATING", "NORMAL", "WARNING", "CRITICAL"]
+    assert rows[2]["detail"] == "eyes closed" and rows[2]["elapsed"] == "0:09"

@@ -1,13 +1,14 @@
-// Browser port of src/watch/report.py: records the session and exports a PNG report with graphs and a CSV.
+// Browser port of src/watch/report.py: records the session and exports a line graph of alertness over time, and an event log as a CSV.
 
 const REPORT = {
   surface: "#fcfcfb", grid: "#e1e0d9", axis: "#c3c2b7",
   ink: "#0b0b0b", ink2: "#52514e", muted: "#898781",
-  series1: "#2a78d6", series2: "#eb6834",
   levels: { Normal: "#0ca30c", Warning: "#fab219", Critical: "#d03b3b", "No face": "#898781", Calibrating: "#c3c2b7", "Camera lost": "#7a1f1f" },
   font: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
 };
 const REPORT_LEVEL_NAMES = { 0: "Normal", 1: "Warning", 2: "Critical" };
+const REPORT_STATUS = { Normal: "NORMAL", Warning: "WARNING", Critical: "CRITICAL", "No face": "NO FACE DETECTED", Calibrating: "CALIBRATING", "Camera lost": "CAMERA LOST" };
+const REPORT_LEVEL_VALUE = { Normal: 0, Warning: 1, Critical: 2 };
 
 function reportClock(seconds) {
   const s = Math.max(0, Math.round(seconds));
@@ -40,195 +41,153 @@ class SessionLog {
     this.pendingEvent = "";
   }
 
+  log() {
+    const rows = [];
+    let previous = null;
+    for (const sample of this.samples) {
+      const events = sample.event.split(";").map((e) => e.trim()).filter(Boolean);
+      const head = (event) => event.split(":")[0];
+      const reason = events.filter((e) => head(e) === sample.state).map((e) => e.split(":").slice(1).join(":").trim()).pop() || "";
+      if (sample.state !== previous) {
+        const others = events.filter((e) => head(e) !== sample.state);
+        rows.push({ clock: sample.clock, elapsed: sample.elapsed, status: REPORT_STATUS[sample.state], detail: reason || others.join("; ").toLowerCase() });
+        previous = sample.state;
+      } else {
+        for (const event of events) if (head(event) !== sample.state) rows.push({ clock: sample.clock, elapsed: sample.elapsed, status: event.toUpperCase(), detail: "" });
+      }
+    }
+    return rows;
+  }
+
+  timeInStates() {
+    const seconds = Object.fromEntries(Object.keys(REPORT.levels).map((state) => [state, 0]));
+    for (let i = 1; i < this.samples.length; i++) seconds[this.samples[i - 1].state] += this.samples[i].elapsed - this.samples[i - 1].elapsed;
+    if (this.samples.length) seconds[this.samples[this.samples.length - 1].state] += this.interval;
+    return seconds;
+  }
+
   summary() {
     if (!this.samples.length) return "No data recorded";
-    const seconds = { Critical: 0 };
     let warnings = 0, criticals = 0;
     for (let i = 1; i < this.samples.length; i++) {
       const current = this.samples[i - 1], following = this.samples[i];
-      seconds[current.state] = (seconds[current.state] || 0) + following.elapsed - current.elapsed;
       if (following.state === "Warning" && (current.state === "Normal" || current.state === "No face")) warnings++;
       if (following.state === "Critical" && current.state !== "Critical") criticals++;
     }
     const started = new Date(this.samples[0].clock * 1000);
     return `Started ${started.toLocaleDateString("en-CA")} ${started.toLocaleTimeString([], { hour12: false })}  ·  duration ${reportClock(this.samples[this.samples.length - 1].elapsed)}`
-      + `  ·  warnings ${warnings}  ·  critical alerts ${criticals}  ·  time in critical ${reportClock(seconds.Critical)}`;
+      + `  ·  warnings ${warnings}  ·  critical alerts ${criticals}`;
   }
 
   csv() {
-    const columns = ["time", "elapsed", "state", "ear", "mar", "head_down", "head_tilt", "ear_closed_limit", "head_down_limit", "head_tilt_limit", "event"];
-    const keys = ["clock", "elapsed", "state", "ear", "mar", "headDown", "headTilt", "earClosedLimit", "headDownLimit", "headTiltLimit", "event"];
-    const cell = (value) => (value === null ? "" : typeof value === "number" ? String(Math.round(value * 10000) / 10000) : `"${String(value).replace(/"/g, '""')}"`);
-    const rows = this.samples.map((s) => keys.map((key, i) => (i === 0 ? new Date(s.clock * 1000).toLocaleTimeString([], { hour12: false }) : cell(s[key]))).join(","));
-    return [columns.join(","), ...rows].join("\n");
+    const cell = (value) => (/[",]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+    const rows = this.log().map((r) => [new Date(r.clock * 1000).toLocaleTimeString([], { hour12: false }), reportClock(r.elapsed), r.status, r.detail].map(cell).join(","));
+    return ["time,elapsed,status,detail", ...rows].join("\n");
   }
 
   // Mirrors SessionLog._write_png in src/watch/report.py.
   drawReport(canvas) {
-    const W = 1800, H = 1290;
+    const scale = 150, W = 12 * scale, H = Math.round(5.2 * scale);
     canvas.width = W;
     canvas.height = H;
     const g = canvas.getContext("2d");
     g.fillStyle = REPORT.surface;
     g.fillRect(0, 0, W, H);
-    const left = 126, right = 1584, t = this.samples.map((s) => s.elapsed);
-    const tMax = Math.max(t.length ? t[t.length - 1] : 0, 1);
-    const x = (value) => left + (value / tMax) * (right - left);
-    const text = (str, px, py, { size = 16, weight = "normal", color = REPORT.ink2, align = "left", baseline = "alphabetic" } = {}) => {
-      g.font = `${weight} ${size}px ${REPORT.font}`;
+    const text = (str, x, y, { size = 9, weight = "normal", color = REPORT.ink2, align = "left", baseline = "alphabetic" } = {}) => {
+      g.font = `${weight} ${Math.round((size * scale) / 72)}px ${REPORT.font}`;
       g.fillStyle = color;
       g.textAlign = align;
       g.textBaseline = baseline;
-      g.fillText(str, px, py);
+      g.fillText(str, x, y);
     };
+    const label = (state) => REPORT_STATUS[state].charAt(0) + REPORT_STATUS[state].slice(1).toLowerCase();
 
-    text("WATCH session report", left, 66, { size: 32, weight: "bold", color: REPORT.ink });
-    text(this.summary(), left, 108, { size: 18 });
+    text("WATCH session report", 0.06 * W, 0.07 * H, { size: 16, weight: "bold", color: REPORT.ink });
+    text(this.summary(), 0.06 * W, 0.125 * H, { size: 9.5 });
+    const seconds = this.timeInStates();
+    const totals = Object.keys(REPORT.levels).filter((s) => seconds[s] >= 0.5).map((s) => `${label(s)} ${reportClock(seconds[s])}`).join("  ·  ");
+    text("Time in each state:  " + (totals || "-"), 0.06 * W, 0.17 * H, { size: 9.5 });
+    text("Alertness over time", 0.06 * W, 0.26 * H, { size: 11, weight: "bold", color: REPORT.ink });
 
-    // Panel layout follows the PNG from report.py: a short alert-level band, then eyes, mouth and head.
-    const panels = [];
-    let top = 180;
-    for (const [title, height] of [["Alert level", 72], ["Eyes", 220], ["Mouth", 220], ["Head", 260]]) {
-      panels.push({ title, top, bottom: top + height });
-      top += height + 84;
-    }
-
-    const legend = (items, py) => {
-      items.forEach(([label, color, kind], i) => {
-        const ly = py + i * 30;
-        g.fillStyle = color;
-        g.strokeStyle = color;
-        if (kind === "line") {
-          g.lineWidth = 3;
-          g.beginPath();
-          g.moveTo(1606, ly);
-          g.lineTo(1636, ly);
-          g.stroke();
-        } else {
-          g.fillRect(1606, ly - 8, 22, 16);
-        }
-        text(label, 1646, ly, { size: 17, baseline: "middle" });
-      });
-    };
-
-    // 1. Alert level band.
-    const band = panels[0];
-    text(band.title, left, band.top - 16, { size: 21, weight: "bold", color: REPORT.ink });
-    // One block per run of the same state, on whole pixels, so the band has no seams.
-    const used = new Set();
+    const left = 0.11 * W, right = 0.82 * W, top = 0.32 * H, bottom = 0.85 * H;
+    const end = this.samples.length ? this.samples[this.samples.length - 1].elapsed + this.interval : 1;
+    const tMax = Math.max(end, 1);
+    const x = (t) => left + (t / tMax) * (right - left);
+    const y = (v) => bottom - ((v + 0.4) / 2.8) * (bottom - top);
+    const runs = [];
     for (let i = 0, start = 0; i < this.samples.length; i++) {
       const next = this.samples[i + 1];
       if (next && next.state === this.samples[start].state) continue;
-      const begin = Math.round(x(this.samples[start].elapsed));
-      const end = Math.round(x(next ? next.elapsed : this.samples[i].elapsed + this.interval));
-      g.fillStyle = REPORT.levels[this.samples[start].state];
-      g.fillRect(begin, band.top, Math.max(Math.min(end, right) - begin, 1), band.bottom - band.top);
-      used.add(this.samples[start].state);
+      runs.push({ state: this.samples[start].state, begin: this.samples[start].elapsed, finish: next ? next.elapsed : end });
       start = i + 1;
     }
-    legend(Object.keys(REPORT.levels).filter((state) => used.has(state)).map((state) => [state, REPORT.levels[state], "box"]), band.top + 8);
 
-    const niceTicks = (lo, hi, count = 4) => {
-      const span = hi - lo || 1, rough = span / count;
-      const unit = 10 ** Math.floor(Math.log10(rough));
-      const step = [1, 2, 2.5, 5, 10].map((m) => m * unit).find((s) => s >= rough);
-      const ticks = [];
-      const last = Math.ceil(hi / step - 1e-9) * step;
-      for (let v = Math.floor(lo / step) * step; v <= last + step * 1e-9; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
-      return ticks;
-    };
-
-    const plot = (panel, unit, seriesList, limits, floorAtZero) => {
-      text(panel.title, left, panel.top - 16, { size: 21, weight: "bold", color: REPORT.ink });
-      const values = [...seriesList, ...limits].flatMap(([key]) => this.samples.map((s) => s[key])).filter((v) => v !== null);
-      let lo = values.length ? Math.min(...values) : 0, hi = values.length ? Math.max(...values) : 1;
-      if (floorAtZero) lo = Math.min(lo, 0);
-      const pad = (hi - lo || 1) * 0.08;
-      const ticks = niceTicks(lo - (floorAtZero ? 0 : pad), hi + pad);
-      const yLo = ticks[0], yHi = ticks[ticks.length - 1];
-      const y = (value) => panel.bottom - ((value - yLo) / (yHi - yLo || 1)) * (panel.bottom - panel.top);
-      g.lineWidth = 1;
-      for (const tick of ticks) {
-        g.strokeStyle = tick === yLo ? REPORT.axis : REPORT.grid;
-        g.beginPath();
-        g.moveTo(left, Math.round(y(tick)) + 0.5);
-        g.lineTo(right, Math.round(y(tick)) + 0.5);
-        g.stroke();
-        text(String(tick), left - 12, y(tick), { size: 15, color: REPORT.muted, align: "right", baseline: "middle" });
-      }
-      g.save();
-      g.translate(left - 72, (panel.top + panel.bottom) / 2);
-      g.rotate(-Math.PI / 2);
-      text(unit, 0, 0, { size: 15, color: REPORT.muted, align: "center" });
-      g.restore();
-
-      // Calibrated limits as labelled step lines, since recalibration can move them.
-      for (const [key, label] of limits) {
-        const points = this.samples.filter((s) => s[key] !== null);
-        if (!points.length) continue;
-        g.strokeStyle = REPORT.muted;
-        g.lineWidth = 1.5;
-        g.setLineDash([8, 6]);
-        g.beginPath();
-        points.forEach((s, i) => {
-          if (i === 0) g.moveTo(x(s.elapsed), y(s[key]));
-          else {
-            g.lineTo(x(s.elapsed), y(points[i - 1][key]));
-            g.lineTo(x(s.elapsed), y(s[key]));
-          }
-        });
-        g.lineTo(right, y(points[points.length - 1][key]));
-        g.stroke();
-        g.setLineDash([]);
-        text(label(points[points.length - 1][key]), right + 10, y(points[points.length - 1][key]), { size: 15, baseline: "middle" });
-      }
-
-      for (const [key, color] of seriesList) {
-        g.strokeStyle = color;
-        g.lineWidth = 3;
-        g.lineJoin = "round";
-        g.lineCap = "round";
-        g.beginPath();
-        let drawing = false;
-        for (const s of this.samples) {
-          if (s[key] === null) {
-            drawing = false;
-            continue;
-          }
-          if (drawing) g.lineTo(x(s.elapsed), y(s[key]));
-          else g.moveTo(x(s.elapsed), y(s[key]));
-          drawing = true;
-        }
-        g.stroke();
-      }
-    };
-
-    for (const s of this.samples) s.yawnLevel = 0.45;
-    plot(panels[1], "EAR", [["ear", REPORT.series1]], [["earClosedLimit", (v) => `closed limit ${v.toFixed(2)}`]], true);
-    plot(panels[2], "MAR", [["mar", REPORT.series1]], [["yawnLevel", (v) => `yawn level ${v.toFixed(2)}`]], true);
-    plot(panels[3], "degrees", [["headDown", REPORT.series1], ["headTilt", REPORT.series2]], [
-      ["headDownLimit", (v) => `down limit ${v.toFixed(1)}°`],
-      ["headTiltLimit", (v) => `tilt limit ${v.toFixed(1)}°`],
-    ], false);
-    // Head legend sits inline beside its title, clear of the limit labels on the right.
-    g.font = `bold 21px ${REPORT.font}`;
-    let lx = left + g.measureText("Head").width + 28;
-    for (const [label, color] of [["Down", REPORT.series1], ["Tilt", REPORT.series2]]) {
-      g.strokeStyle = color;
-      g.lineWidth = 3;
+    for (const run of runs) {
+      if (run.state in REPORT_LEVEL_VALUE) continue;
+      g.globalAlpha = 0.25;
+      g.fillStyle = REPORT.levels[run.state];
+      g.fillRect(x(run.begin), top, x(run.finish) - x(run.begin), bottom - top);
+      g.globalAlpha = 1;
+    }
+    g.lineWidth = 1;
+    for (const [state, value] of Object.entries(REPORT_LEVEL_VALUE)) {
+      g.strokeStyle = REPORT.grid;
       g.beginPath();
-      g.moveTo(lx, panels[3].top - 23);
-      g.lineTo(lx + 28, panels[3].top - 23);
+      g.moveTo(left, Math.round(y(value)) + 0.5);
+      g.lineTo(right, Math.round(y(value)) + 0.5);
       g.stroke();
-      text(label, lx + 36, panels[3].top - 23, { size: 17, baseline: "middle" });
-      g.font = `normal 17px ${REPORT.font}`;
-      lx += 36 + g.measureText(label).width + 24;
+      text(label(state), left - 12, y(value), { size: 8.5, color: REPORT.muted, align: "right", baseline: "middle" });
+    }
+    g.strokeStyle = REPORT.axis;
+    g.beginPath();
+    g.moveTo(left, bottom + 0.5);
+    g.lineTo(right, bottom + 0.5);
+    g.stroke();
+
+    let previous = null;
+    g.lineWidth = 2;
+    g.strokeStyle = REPORT.axis;
+    for (const run of runs) {
+      if (!(run.state in REPORT_LEVEL_VALUE)) {
+        previous = null;
+        continue;
+      }
+      const value = REPORT_LEVEL_VALUE[run.state];
+      if (previous && previous.finish === run.begin) {
+        g.beginPath();
+        g.moveTo(x(run.begin), y(previous.value));
+        g.lineTo(x(run.begin), y(value));
+        g.stroke();
+      }
+      previous = { finish: run.finish, value };
+    }
+    g.lineWidth = 4.5;
+    for (const run of runs) {
+      if (!(run.state in REPORT_LEVEL_VALUE)) continue;
+      g.strokeStyle = REPORT.levels[run.state];
+      g.beginPath();
+      g.moveTo(x(run.begin), y(REPORT_LEVEL_VALUE[run.state]));
+      g.lineTo(x(run.finish), y(REPORT_LEVEL_VALUE[run.state]));
+      g.stroke();
     }
 
-    // Shared time axis under the last panel.
-    const last = panels[3];
     const step = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].find((s) => tMax / s <= 8) || 7200;
-    for (let v = 0; v <= tMax + 1e-9; v += step) text(reportClock(v), x(v), last.bottom + 26, { size: 15, color: REPORT.muted, align: "center" });
-    text("time since start (m:ss)", (left + right) / 2, last.bottom + 60, { size: 15, color: REPORT.muted, align: "center" });
+    for (let v = 0; v <= tMax + 1e-9; v += step) text(reportClock(v), x(v), bottom + 0.045 * H, { size: 8, color: REPORT.muted, align: "center" });
+    text("time since start (m:ss)", (left + right) / 2, bottom + 0.09 * H, { size: 8.5, color: REPORT.muted, align: "center" });
+
+    const used = new Set(runs.map((r) => r.state));
+    const legend = [...Object.keys(REPORT_LEVEL_VALUE).filter((s) => used.has(s)).map((s) => [s, "line"]),
+      ...Object.keys(REPORT.levels).filter((s) => !(s in REPORT_LEVEL_VALUE) && used.has(s)).map((s) => [s, "area"])];
+    legend.forEach(([state, kind], i) => {
+      const ly = top + 0.035 * H + i * 0.052 * H, lx = 0.835 * W;
+      g.fillStyle = REPORT.levels[state];
+      if (kind === "line") g.fillRect(lx, ly - 3, 48, 6);
+      else {
+        g.globalAlpha = 0.25;
+        g.fillRect(lx, ly - 10, 48, 20);
+        g.globalAlpha = 1;
+      }
+      text(label(state), lx + 66, ly, { size: 8.5, baseline: "middle" });
+    });
   }
 }
