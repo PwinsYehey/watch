@@ -44,7 +44,7 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 5. Critical drops back to a warning after 5 s without signs. If the face leaves the view, the level is held; when the face comes back after 3 s or more, it recalibrates and starts again from normal.
 6. If the camera disconnects, the dashboard shows **CAMERA LOST** and keeps retrying it; the alarm sounds after 3 s, and it recalibrates once the camera is back.
 7. The dashboard beside the video shows the alert level, each sign with its timer, what is being detected, and recent level changes.
-8. Export saves the session so far as a PNG report with graphs of the alert level, eyes, mouth and head, plus a CSV of the readings (`E` in the live monitor, saved to `results/sessions/`; the Export button in the web demo).
+8. Export saves a session report: a PNG line graph of the pilot's alertness over time (normal, warning, critical, with no face, calibrating and camera lost shaded), plus a CSV log of every change and its reason (`E` in the live monitor, saved to `results/sessions/`; the Export button in the web demo).
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
 
