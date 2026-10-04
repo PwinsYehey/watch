@@ -22,6 +22,7 @@ LEVELS = {
 MARGIN, GAP, PAD, HEADER = 16, 16, 12, 52
 VIDEO_W, VIDEO_H, CONTROLS_H = 640, 480, 34
 DASH_W, DASH_PAD, COLUMN_GAP, ROW = 560, 16, 24, 22
+DASH_ROWS = 15
 CREDITS = ("Property of Prince Herrera, Ormin Cariaso,", "John Casili, Christenzien Lalimo")
 
 _FONT_FILES = {
@@ -65,7 +66,8 @@ class DashboardView:
             "key": _font("bold", 12),
         }
         self._text_cache = {}
-        self.size = (MARGIN * 2 + PAD * 2 + VIDEO_W + GAP + DASH_W, HEADER + MARGIN * 2 + PAD * 2 + VIDEO_H + 10 + CONTROLS_H)
+        card_height = max(PAD * 2 + VIDEO_H + 10 + CONTROLS_H, 14 + 96 + 3 * 42 + DASH_ROWS * ROW + 14)
+        self.size = (MARGIN * 2 + PAD * 2 + VIDEO_W + GAP + DASH_W, HEADER + MARGIN * 2 + card_height)
         self._card_top, self._card_bottom = HEADER + MARGIN, self.size[1] - MARGIN
         self._dash_left = MARGIN + PAD * 2 + VIDEO_W + GAP
         # The header and empty cards never change, so they are drawn once and copied each frame.
@@ -101,7 +103,7 @@ class DashboardView:
 
         # Video card with the controls row under it.
         self._video(image, frame_bgr, (MARGIN + PAD, card_top + PAD))
-        self._controls(draw, MARGIN + PAD, card_top + PAD + VIDEO_H + 10, live, muted, notice)
+        self._controls(draw, MARGIN + PAD, card_bottom - PAD - CONTROLS_H, live, muted, notice)
 
         # Dashboard: alert level, signs, detection and calibration on the left; recent events on the right.
         left = self._dash_left
