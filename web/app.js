@@ -337,6 +337,7 @@ function ensureModels() {
       let backendOk = await tf.setBackend("webgl");
       if (!backendOk) backendOk = await tf.setBackend("wasm");
       await tf.ready();
+      ensureBlazeface();
       console.log("TF.js backend:", tf.getBackend());
 
       const eyeModel = await tf.loadLayersModel("models/eye/model.json");
@@ -384,11 +385,23 @@ function ensureUploadFaceLandmarker(vision, baseOptions) {
 }
 
 let blazefacePromise = null;
+let blazefaceModel = null;
 function ensureBlazeface() {
   if (!blazefacePromise) {
-    blazefacePromise = blazeface.load({ maxFaces: 1, scoreThreshold: 0.3 });
+    blazefacePromise = blazeface.load({ maxFaces: 1, scoreThreshold: 0.3, modelUrl: "models/blazeface/model.json" }).then((model) => (blazefaceModel = model));
   }
   return blazefacePromise;
+}
+
+async function warmUpDetectors(faceLandmarker, zoomLandmarker) {
+  const frame = document.createElement("canvas");
+  frame.width = DISPLAY_WIDTH;
+  frame.height = DISPLAY_HEIGHT;
+  const zoom = document.createElement("canvas");
+  zoom.width = zoom.height = 256;
+  faceLandmarker.detectForVideo(frame, performance.now());
+  zoomLandmarker.detect(zoom);
+  await (await ensureBlazeface()).estimateFaces(frame, false);
 }
 
 // Mirrors brackets in src/watch/live.py.
@@ -692,6 +705,7 @@ async function main() {
   statusEl.textContent = "Loading models...";
   const { eyeModel, yawnModel, faceLandmarker, vision, baseOptions } = await ensureModels();
   const zoomLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
+  await warmUpDetectors(faceLandmarker, zoomLandmarker);
 
   statusEl.textContent = "Requesting camera...";
   const stream = await navigator.mediaDevices.getUserMedia({ video: { width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT } });
@@ -806,7 +820,7 @@ async function main() {
       // Retry faces the tracker misses, such as one far from the camera.
       if (!result.faceLandmarks.length && performance.now() - lastZoomTry > 500) {
         lastZoomTry = performance.now();
-        result = (await detectZoomed(zoomLandmarker, glareCleanCanvas)) || result;
+        result = (await detectZoomed(zoomLandmarker, glareCleanCanvas, false)) || result;
       }
       const faceFound = result.faceLandmarks.length > 0;
       glareBox = faceFound ? faceBox(result.faceLandmarks[0], canvas.width, canvas.height) : null;
@@ -904,9 +918,15 @@ const zoomCanvas = document.createElement("canvas");
 const zoomCtx = zoomCanvas.getContext("2d");
 
 // Mirrors FaceTracker._landmarks in src/watch/face.py.
-async function detectZoomed(landmarker, source) {
+async function detectZoomed(landmarker, source, wait = true) {
   const w = source.width, h = source.height;
-  const blazefaceModel = await ensureBlazeface();
+  if (!blazefaceModel) {
+    if (!wait) {
+      ensureBlazeface();
+      return null;
+    }
+    await ensureBlazeface();
+  }
   const faces = await blazefaceModel.estimateFaces(source, false);
   if (!faces.length) return null;
 
