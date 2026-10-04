@@ -74,6 +74,8 @@ const CONFIG = {
     "lowLightTarget": 0.45,
     "levelMinAngleDeg": 15,
     "sharpMin": 100.0,
+    "cameraRetrySec": 1.0,
+    "cameraLostAlarmSec": 3.0,
     "blurryBelow": 40.0,
     "faceDetectionConfidence": 0.3,
     "faceTrackingConfidence": 0.5,

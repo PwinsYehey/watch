@@ -221,6 +221,7 @@ const LEVEL_BANNERS = {
   1: { text: "WARNING", color: "#ffd700" },
   2: { text: "CRITICAL", color: "#dc0000" },
   no_face: { text: "NO FACE DETECTED", color: "#787878" },
+  camera_lost: { text: "CAMERA LOST", color: "#dc0000" },
 };
 
 function linearScore(value, lowAtZero, highAtOne) {
@@ -744,6 +745,61 @@ async function main() {
   headPoseCfg = CONFIG.headPose;
   let paused = false;
   let noFaceSince = null;
+  let cameraLostSince = null, nextCameraRetry = 0, lastVideoTime = -1, lastVideoChange = performance.now();
+
+  function cameraStalled() {
+    const track = cameraStream?.getVideoTracks()[0];
+    if (!track || track.readyState === "ended") return true;
+    if (video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+      lastVideoChange = performance.now();
+    }
+    return performance.now() - lastVideoChange > 2000;
+  }
+
+  async function handleCameraLost() {
+    const now = performance.now();
+    if (cameraLostSince === null) {
+      cameraLostSince = now;
+      dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: "camera_lost", reason: "" });
+      session.event("Camera lost");
+    }
+    const lostFor = (now - cameraLostSince) / 1000;
+    const alarming = lostFor >= CONFIG.live.cameraLostAlarmSec;
+    if (alarming) startAlarm();
+    setDashLevel("CAMERA LOST", LEVEL_BANNERS.camera_lost.color, "check the camera connection", `lost ${lostFor.toFixed(0)}s${alarming ? " · alarm on" : ""}`, false);
+    document.getElementById("dashEvents").innerHTML = dashEvents.map((e) => `<li style="color:${LEVEL_BANNERS[e.level].color}">${e.time} ${LEVEL_BANNERS[e.level].text} ${e.reason}</li>`).join("");
+    session.add(Date.now() / 1000, "Camera lost");
+    displayCtx.filter = "brightness(0.3)";
+    displayCtx.drawImage(mirrorCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+    displayCtx.filter = "none";
+    if (now < nextCameraRetry) return;
+    nextCameraRetry = now + CONFIG.live.cameraRetrySec * 1000;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT } });
+      if (!cameraActive) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      cameraStream?.getTracks().forEach((track) => track.stop());
+      cameraStream = stream;
+      video.srcObject = stream;
+      await new Promise((r) => (video.onloadedmetadata = r));
+      await video.play();
+    } catch {
+      return;
+    }
+    cameraLostSince = null;
+    lastVideoTime = -1;
+    lastVideoChange = performance.now();
+    stopAlarm();
+    await runCalibration();
+    resetMonitors();
+    dashLastLevel = 0;
+    sessionLevel = 0;
+    dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: 0, reason: "recalibrated" });
+    session.event("Recalibrated");
+  }
   let lastZoomTry = -Infinity;
   let glareBox = null;
 
@@ -810,6 +866,11 @@ async function main() {
     if (!cameraActive) return;
     try {
       if (paused) {
+        requestAnimationFrame(frame);
+        return;
+      }
+      if (cameraStalled()) {
+        await handleCameraLost();
         requestAnimationFrame(frame);
         return;
       }

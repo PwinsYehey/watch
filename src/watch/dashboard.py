@@ -17,6 +17,7 @@ LEVELS = {
     2: ("CRITICAL", RED),
     "no_face": ("NO FACE DETECTED", GRAY),
     "calibrating": ("CALIBRATING", (255, 165, 0)),
+    "camera_lost": ("CAMERA LOST", RED),
 }
 
 MARGIN, GAP, PAD, HEADER = 16, 16, 12, 52

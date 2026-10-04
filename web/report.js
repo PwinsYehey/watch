@@ -4,7 +4,7 @@ const REPORT = {
   surface: "#fcfcfb", grid: "#e1e0d9", axis: "#c3c2b7",
   ink: "#0b0b0b", ink2: "#52514e", muted: "#898781",
   series1: "#2a78d6", series2: "#eb6834",
-  levels: { Normal: "#0ca30c", Warning: "#fab219", Critical: "#d03b3b", "No face": "#898781", Calibrating: "#c3c2b7" },
+  levels: { Normal: "#0ca30c", Warning: "#fab219", Critical: "#d03b3b", "No face": "#898781", Calibrating: "#c3c2b7", "Camera lost": "#7a1f1f" },
   font: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
 };
 const REPORT_LEVEL_NAMES = { 0: "Normal", 1: "Warning", 2: "Critical" };
