@@ -125,6 +125,8 @@ live:
   low_light_target: 0.45
   # Crops tilted more than this are rotated level.
   level_min_angle_deg: 15
+  sharp_min: 100.0
+  blurry_below: 40.0
   face_detection_confidence: 0.3
   face_tracking_confidence: 0.5
   recalibrate_gap_sec: 3.0

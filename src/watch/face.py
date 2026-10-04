@@ -139,6 +139,16 @@ def mean_brightness(image: np.ndarray) -> float:
     return float(cv2.cvtColor(cv2.resize(image, (64, 48)), cv2.COLOR_BGR2GRAY).mean()) / 255.0
 
 
+def face_sharpness(image: np.ndarray, landmarks) -> float | None:
+    h, w = image.shape[:2]
+    xs, ys = [p.x * w for p in landmarks], [p.y * h for p in landmarks]
+    x0, x1, y0, y1 = int(max(min(xs), 0)), int(min(max(xs), w)), int(max(min(ys), 0)), int(min(max(ys), h))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    face = cv2.resize(cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY), (128, 128), interpolation=cv2.INTER_AREA)
+    return float(cv2.Laplacian(face, cv2.CV_64F).var())
+
+
 def brighten(image: np.ndarray, dark_below: float, target: float) -> np.ndarray:
     """Gamma-lifts frames darker than dark_below to a mean brightness of target."""
     mean = mean_brightness(image)

@@ -11,7 +11,7 @@ from watch import dashboard as ui
 from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian, head_droop
 from watch.config import load_config
 from watch.report import LEVEL_NAMES, SessionLog
-from watch.face import FACE_MESH, FaceTracker, mean_brightness
+from watch.face import FACE_MESH, FaceTracker, brighten, face_sharpness, mean_brightness
 from watch.model import Classifier
 
 WINDOW = "WATCH - Live Alertness Monitoring"
@@ -173,7 +173,7 @@ class LiveMonitor:
         label = "nodding" if droop >= self.config["nod"]["closedness_threshold"] else "upright"
         return {"score": droop, "label": label, "pitch": pitch, "roll": roll}
 
-    def _draw(self, frame, regions, cues, escalation, statuses, fps, brightness):
+    def _draw(self, frame, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
         h, w = frame.shape[:2]
 
         def point(i):
@@ -202,11 +202,11 @@ class LiveMonitor:
             for i in (10, 152):
                 cv2.circle(frame, point(i), 4, color, -1, cv2.LINE_AA)
 
-        level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness)
+        level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness, sharpness)
         notice = self._notice if time.time() < self._notice_until else ""
         return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings, notice=notice)
 
-    def _dashboard(self, regions, cues, escalation, statuses, fps, brightness):
+    def _dashboard(self, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
         """The dashboard contents, mirroring updateDashboard and showCalibration in web/app.js."""
         name, color = ui.LEVELS["no_face" if regions is None and escalation.level == 0 else escalation.level]
         timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
@@ -232,6 +232,7 @@ class LiveMonitor:
             ui.Row((ui.RED, ui.YELLOW, ui.GREEN)[len(eyes)] if face else ui.GRAY, "Eyes", f"{len(eyes)} of 2 readable" if face else "-"),
             ui.Row((ui.GREEN if mouth else ui.YELLOW) if face else ui.GRAY, "Mouth", ("readable" if mouth else "not readable") if face else "-"),
             ui.Row(ui.YELLOW if dark else ui.GREEN, "Lighting", "low, boosted" if dark else "good"),
+            self._sharpness_row(sharpness),
             ui.Row(ui.GREEN if fps >= 15 else ui.YELLOW, "FPS", f"{fps:.0f}"),
             ui.Row(ui.GREEN, "Device", "CPU"),
         ]
@@ -255,6 +256,15 @@ class LiveMonitor:
         ]
         readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
         return level, signs, checks, calibration, readings
+
+    def _sharpness_row(self, sharpness):
+        if sharpness is None:
+            return ui.Row(ui.GRAY, "Sharpness", "-")
+        if sharpness >= self.settings["sharp_min"]:
+            return ui.Row(ui.GREEN, "Sharpness", "sharp")
+        if sharpness >= self.settings["blurry_below"]:
+            return ui.Row(ui.YELLOW, "Sharpness", "a bit blurry")
+        return ui.Row(ui.RED, "Sharpness", "blurry")
 
     @staticmethod
     def _readings(cues):
@@ -325,7 +335,8 @@ class LiveMonitor:
                 state = "No face" if regions is None and escalation.level == 0 else LEVEL_NAMES[escalation.level]
                 self.session.add(now, state, self._readings(cues), self._limits())
 
-                view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame))
+                sharpness = face_sharpness(brighten(frame, self.settings["low_light_mean"], self.settings["low_light_target"]), regions.landmarks) if regions else None
+                view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame), sharpness)
                 previous = now
                 cv2.imshow(WINDOW, view)
                 key = cv2.waitKey(1) & 0xFF

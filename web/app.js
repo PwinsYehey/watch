@@ -127,6 +127,35 @@ function faceBox(landmarks, w, h, margin = 0.3) {
   return box.x1 > box.x0 && box.y1 > box.y0 ? box : null;
 }
 
+const sharpCanvas = document.createElement("canvas");
+sharpCanvas.width = sharpCanvas.height = 128;
+const sharpCtx = sharpCanvas.getContext("2d", { willReadFrequently: true });
+
+function faceSharpness(source, landmarks) {
+  const w = source.width, h = source.height;
+  const xs = landmarks.map((p) => p.x * w), ys = landmarks.map((p) => p.y * h);
+  const x0 = Math.max(Math.min(...xs), 0), x1 = Math.min(Math.max(...xs), w);
+  const y0 = Math.max(Math.min(...ys), 0), y1 = Math.min(Math.max(...ys), h);
+  if (x1 - x0 < 8 || y1 - y0 < 8) return null;
+  sharpCtx.imageSmoothingQuality = "high";
+  sharpCtx.drawImage(source, x0, y0, x1 - x0, y1 - y0, 0, 0, 128, 128);
+  const { data } = sharpCtx.getImageData(0, 0, 128, 128);
+  const gray = new Float32Array(128 * 128);
+  for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  let sum = 0, sumSq = 0, n = 0;
+  for (let y = 1; y < 127; y++) {
+    for (let x = 1; x < 127; x++) {
+      const k = y * 128 + x;
+      const lap = gray[k - 128] + gray[k + 128] + gray[k - 1] + gray[k + 1] - 4 * gray[k];
+      sum += lap;
+      sumSq += lap * lap;
+      n++;
+    }
+  }
+  const mean = sum / n;
+  return sumSq / n - mean * mean;
+}
+
 function isGlarePixel(r, g, b) {
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   return max > 235 && max - min < 60;
@@ -533,7 +562,7 @@ function resetDashboard() {
 }
 
 // Mirrors LiveMonitor._dashboard in src/watch/live.py.
-function updateDashboard({ escalation, faceFound, left, right, mouth, head, statuses, fps, brightness }) {
+function updateDashboard({ escalation, faceFound, left, right, mouth, head, statuses, fps, brightness, sharpness }) {
   if (escalation.level !== dashLastLevel) {
     dashLastLevel = escalation.level;
     dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
@@ -566,6 +595,10 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
     ["Eyes", faceFound ? `${eyes.length} of 2 readable` : "-", faceFound ? [DOT.red, DOT.yellow, DOT.green][eyes.length] : DOT.gray],
     ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
     ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
+    sharpness == null ? ["Sharpness", "-", DOT.gray]
+      : sharpness >= CONFIG.live.sharpMin ? ["Sharpness", "sharp", DOT.green]
+      : sharpness >= CONFIG.live.blurryBelow ? ["Sharpness", "a bit blurry", DOT.yellow]
+      : ["Sharpness", "blurry", DOT.red],
     ["FPS", fps.toFixed(0), fps >= 15 ? DOT.green : DOT.yellow],
     ["GPU", gpu.name, gpu.color],
   ];
@@ -844,6 +877,7 @@ async function main() {
       updateDashboard({
         escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult,
         statuses: { eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, fps, brightness,
+        sharpness: faceFound ? faceSharpness(glareCleanCanvas, result.faceLandmarks[0]) : null,
       });
 
       if (!cameraActive) return;
