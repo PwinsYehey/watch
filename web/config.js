@@ -73,6 +73,8 @@ const CONFIG = {
     "lowLightMean": 0.3,
     "lowLightTarget": 0.45,
     "levelMinAngleDeg": 15,
+    "sharpMin": 100.0,
+    "blurryBelow": 40.0,
     "faceDetectionConfidence": 0.3,
     "faceTrackingConfidence": 0.5,
     "recalibrateGapSec": 3.0,
