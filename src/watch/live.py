@@ -56,6 +56,10 @@ def linear_score(value: float, low: float, high: float) -> float:
     return 0.0 if high == low else min(1.0, max(0.0, (value - low) / (high - low)))
 
 
+class _Quit(Exception):
+    pass
+
+
 class Alarm:
     """Repeating beep while active, using winsound on Windows and the terminal bell elsewhere."""
 
@@ -85,8 +89,9 @@ class LiveMonitor:
         self.settings = config["live"]
         self.eye_model, self.yawn_model = Classifier("eye"), Classifier("yawn")
         self.ear, self.head = config["ear"], config["head_pose"]
-        backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
-        self.capture = cv2.VideoCapture(camera, backend)
+        self._camera = camera
+        self._backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        self.capture = cv2.VideoCapture(camera, self._backend)
         if not self.capture.isOpened():
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
         self.tracker = FaceTracker()
@@ -97,6 +102,7 @@ class LiveMonitor:
         self.muted = False
         self.session = SessionLog()
         self._notice, self._notice_until = "", 0.0
+        self._last_frame = None
         self._reset()
 
     def _reset(self):
@@ -108,7 +114,45 @@ class LiveMonitor:
 
     def _read(self):
         ok, frame = self.capture.read()
-        return cv2.flip(frame, 1) if ok else None
+        if not ok:
+            return None
+        frame = cv2.flip(frame, 1)
+        self._last_frame = frame.copy()
+        return frame
+
+    def _handle_key(self, key):
+        if key == ord("q"):
+            raise _Quit
+        if key == ord("m"):
+            self.muted = not self.muted
+        if key == ord("e"):
+            self.export()
+
+    def _camera_lost(self):
+        lost_since, next_retry = time.time(), 0.0
+        self.events.append((time.strftime("%H:%M:%S"), "camera_lost", ""))
+        self.session.event("Camera lost")
+        print("Camera lost, retrying.")
+        while True:
+            now = time.time()
+            lost_for = now - lost_since
+            alarming = lost_for >= self.settings["camera_lost_alarm_sec"]
+            self.alarm.set(alarming and not self.muted)
+            if now >= next_retry:
+                next_retry = now + self.settings["camera_retry_sec"]
+                self.capture.release()
+                self.capture = cv2.VideoCapture(self._camera, self._backend)
+                if self.capture.isOpened() and (frame := self._read()) is not None:
+                    self.alarm.set(False)
+                    print("Camera back.")
+                    return frame
+            self.session.add(now, "Camera lost")
+            name, color = ui.LEVELS["camera_lost"]
+            level = ui.Level(name, color, "check the camera connection", f"lost {lost_for:.0f}s" + (" · alarm on" if alarming else ""))
+            frame = self._last_frame if self._last_frame is not None else np.zeros((480, 640, 3), np.uint8)
+            view = self.view.render((frame * 0.3).astype(np.uint8), level, [], [], [], self._event_lines(), live=True, muted=self.muted, readings=[])
+            cv2.imshow(WINDOW, view)
+            self._handle_key(cv2.waitKey(30) & 0xFF)
 
     def calibrate(self):
         """Measures this user's resting EAR and head pose so thresholds fit them rather than an average face."""
@@ -119,7 +163,8 @@ class LiveMonitor:
         while (remaining := settings["duration_sec"] - (time.time() - start)) > 0:
             frame = self._read()
             if frame is None:
-                break
+                frame = self._camera_lost()
+                start = time.time()
             regions = self.tracker.extract(remove_glare(frame))
             self.session.add(time.time(), "Calibrating")
             if regions:
@@ -130,7 +175,7 @@ class LiveMonitor:
             name, color = ui.LEVELS["calibrating"]
             level = ui.Level(name, color, "look at the camera normally", f"{remaining:.1f}s left")
             cv2.imshow(WINDOW, self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[]))
-            cv2.waitKey(1)
+            self._handle_key(cv2.waitKey(1) & 0xFF)
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
         self.calibrated = len(ears) >= 10
@@ -291,10 +336,17 @@ class LiveMonitor:
         return [(f"{stamp} {ui.LEVELS[level][0]} {reason}", ui.LEVELS[level][1]) for stamp, level, reason in reversed(self.events)]
 
     def run(self):
-        self.calibrate()
         no_face_since, previous, glare_box = None, time.time(), None
         try:
-            while (frame := self._read()) is not None:
+            self.calibrate()
+            while True:
+                if (frame := self._read()) is None:
+                    self._camera_lost()
+                    self.calibrate()
+                    self.events.append((time.strftime("%H:%M:%S"), 0, "recalibrated"))
+                    self.session.event("Recalibrated")
+                    no_face_since, glare_box = None, None
+                    continue
                 # Only glare on the face matters, so skip bright spots elsewhere such as windows.
                 regions = self.tracker.extract(remove_glare(frame, glare_box))
                 glare_box = face_box(regions, frame.shape) if regions else None
@@ -339,13 +391,9 @@ class LiveMonitor:
                 view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame), sharpness)
                 previous = now
                 cv2.imshow(WINDOW, view)
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("q"):
-                    break
-                if key == ord("m"):
-                    self.muted = not self.muted
-                if key == ord("e"):
-                    self.export()
+                self._handle_key(cv2.waitKey(1) & 0xFF)
+        except _Quit:
+            pass
         finally:
             self.alarm.set(False)
             self.capture.release()

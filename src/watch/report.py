@@ -17,6 +17,7 @@ LEVEL_STYLE = {
     "Critical": "#d03b3b",
     "No face": MUTED,
     "Calibrating": AXIS,
+    "Camera lost": "#7a1f1f",
 }
 LEVEL_NAMES = {0: "Normal", 1: "Warning", 2: "Critical"}
 
