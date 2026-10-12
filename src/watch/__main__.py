@@ -3,6 +3,7 @@ import os
 import sys
 import warnings
 
+from watch.camera import camera_source
 from watch.config import MODEL_NAMES
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -86,7 +87,7 @@ def export(_):
 def live(args):
     from watch.live import LiveMonitor
 
-    LiveMonitor(args.camera).run()
+    LiveMonitor(args.camera, args.stream).run()
 
 
 def web(args):
@@ -146,7 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(run=run)
     actions.add_parser("export", help="write TF.js models, web/config.js and TFLite models").set_defaults(run=export)
     sub = actions.add_parser("live", help="webcam alertness monitor")
-    sub.add_argument("--camera", type=int, default=0)
+    sub.add_argument("--camera", type=camera_source, default=0, help="camera index, or 'pi' for a Raspberry Pi camera module")
+    sub.add_argument("--stream", type=int, nargs="?", const=8766, metavar="PORT", help="show the monitor in a browser on this port instead of a window")
     sub.set_defaults(run=live)
     sub = actions.add_parser("web", help="serve the browser demo")
     sub.add_argument("--port", type=int, default=8765)

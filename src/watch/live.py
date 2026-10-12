@@ -9,10 +9,12 @@ import numpy as np
 
 from watch import dashboard as ui
 from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian, head_droop
+from watch.camera import open_camera
 from watch.config import load_config
 from watch.report import LEVEL_NAMES, SessionLog
 from watch.face import FACE_MESH, FaceTracker, brighten, face_sharpness, mean_brightness
 from watch.model import Classifier
+from watch.stream import BrowserStream, Window
 
 WINDOW = "WATCH - Live Alertness Monitoring"
 # Marker colours on the video, as BGR.
@@ -70,6 +72,9 @@ class Alarm:
     def set(self, active: bool):
         self._active.set() if active else self._active.clear()
 
+    def is_active(self) -> bool:
+        return self._active.is_set()
+
     def _loop(self):
         while True:
             self._active.wait()
@@ -83,19 +88,19 @@ class Alarm:
 
 
 class LiveMonitor:
-    def __init__(self, camera: int):
+    def __init__(self, camera, stream_port: int | None = None):
         config = load_config()
         self.config = config
         self.settings = config["live"]
         self.eye_model, self.yawn_model = Classifier("eye"), Classifier("yawn")
         self.ear, self.head = config["ear"], config["head_pose"]
         self._camera = camera
-        self._backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
-        self.capture = cv2.VideoCapture(camera, self._backend)
+        self.capture = open_camera(camera)
         if not self.capture.isOpened():
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
         self.tracker = FaceTracker()
         self.alarm = Alarm()
+        self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active)
         self.view = ui.DashboardView()
         self.events = deque(maxlen=50)
         self.calibrated = False
@@ -141,7 +146,7 @@ class LiveMonitor:
             if now >= next_retry:
                 next_retry = now + self.settings["camera_retry_sec"]
                 self.capture.release()
-                self.capture = cv2.VideoCapture(self._camera, self._backend)
+                self.capture = open_camera(self._camera)
                 if self.capture.isOpened() and (frame := self._read()) is not None:
                     self.alarm.set(False)
                     print("Camera back.")
@@ -151,8 +156,7 @@ class LiveMonitor:
             level = ui.Level(name, color, "check the camera connection", f"lost {lost_for:.0f}s" + (" · alarm on" if alarming else ""))
             frame = self._last_frame if self._last_frame is not None else np.zeros((480, 640, 3), np.uint8)
             view = self.view.render((frame * 0.3).astype(np.uint8), level, [], [], [], self._event_lines(), live=True, muted=self.muted, readings=[])
-            cv2.imshow(WINDOW, view)
-            self._handle_key(cv2.waitKey(30) & 0xFF)
+            self._handle_key(self.display.show(view, 30))
 
     def calibrate(self):
         """Measures this user's resting EAR and head pose so thresholds fit them rather than an average face."""
@@ -174,8 +178,8 @@ class LiveMonitor:
                     rolls.append(regions.roll)
             name, color = ui.LEVELS["calibrating"]
             level = ui.Level(name, color, "look at the camera normally", f"{remaining:.1f}s left")
-            cv2.imshow(WINDOW, self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[]))
-            self._handle_key(cv2.waitKey(1) & 0xFF)
+            view = self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[])
+            self._handle_key(self.display.show(view, 1))
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
         self.calibrated = len(ears) >= 10
@@ -390,12 +394,11 @@ class LiveMonitor:
                 sharpness = face_sharpness(brighten(frame, self.settings["low_light_mean"], self.settings["low_light_target"]), regions.landmarks) if regions else None
                 view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame), sharpness)
                 previous = now
-                cv2.imshow(WINDOW, view)
-                self._handle_key(cv2.waitKey(1) & 0xFF)
+                self._handle_key(self.display.show(view, 1))
         except _Quit:
             pass
         finally:
             self.alarm.set(False)
             self.capture.release()
             self.tracker.close()
-            cv2.destroyAllWindows()
+            self.display.close()
