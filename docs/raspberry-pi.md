@@ -22,6 +22,16 @@ On the page:
 | Export report | `E` | Saves a PNG graph and CSV log on the Pi in `~/watch/results/sessions/`. |
 | Stop monitor | `Q` | Stops the monitor. When it runs as a service it restarts after 5 seconds and recalibrates. |
 
+### Turning it off
+
+Unplugging the Pi while it is running can corrupt the SD card, so shut it down first. In a terminal on the laptop, with the Pi's username in place of `<user>`:
+
+```bash
+ssh -t <user>@raspberrypi.local "sudo shutdown -h now"
+```
+
+Type the Pi's password when asked, wait for the green light to stop blinking (about 15 seconds), then unplug the power. The monitor starts again by itself the next time the Pi is powered on.
+
 ## What changed in the code
 
 | File | Change |
