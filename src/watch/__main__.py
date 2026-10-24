@@ -87,7 +87,7 @@ def export(_):
 def live(args):
     from watch.live import LiveMonitor
 
-    LiveMonitor(args.camera, args.stream).run()
+    LiveMonitor(args.camera, args.stream, args.allow_shutdown).run()
 
 
 def web(args):
@@ -149,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = actions.add_parser("live", help="webcam alertness monitor")
     sub.add_argument("--camera", type=camera_source, default=0, help="camera index, or 'pi' for a Raspberry Pi camera module")
     sub.add_argument("--stream", type=int, nargs="?", const=8766, metavar="PORT", help="show the monitor in a browser on this port instead of a window")
+    sub.add_argument("--allow-shutdown", action="store_true", help="with --stream, add a button to the page that powers this machine off")
     sub.set_defaults(run=live)
     sub = actions.add_parser("web", help="serve the browser demo")
     sub.add_argument("--port", type=int, default=8765)

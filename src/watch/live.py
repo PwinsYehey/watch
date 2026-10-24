@@ -88,7 +88,7 @@ class Alarm:
 
 
 class LiveMonitor:
-    def __init__(self, camera, stream_port: int | None = None):
+    def __init__(self, camera, stream_port: int | None = None, allow_shutdown: bool = False):
         config = load_config()
         self.config = config
         self.settings = config["live"]
@@ -100,7 +100,7 @@ class LiveMonitor:
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
         self.tracker = FaceTracker()
         self.alarm = Alarm()
-        self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active)
+        self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active, allow_shutdown)
         self.view = ui.DashboardView()
         self.events = deque(maxlen=50)
         self.calibrated = False

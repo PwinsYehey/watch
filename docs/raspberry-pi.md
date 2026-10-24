@@ -21,16 +21,21 @@ On the page:
 | Mute / unmute alarm | `M` | Silences the alarm. |
 | Export report | `E` | Saves a PNG graph and CSV log on the Pi in `~/watch/results/sessions/`. |
 | Stop monitor | `Q` | Stops the monitor. When it runs as a service it restarts after 5 seconds and recalibrates. |
+| Shut down device | | Powers the Pi off after a confirmation. Only shown when the monitor runs with `--allow-shutdown`. |
 
 ### Turning it off
 
-Unplugging the Pi while it is running can corrupt the SD card, so shut it down first. In a terminal on the laptop, with the Pi's username in place of `<user>`:
+Unplugging the Pi while it is running can corrupt the SD card, so shut it down first.
+
+Click **Shut down device** on the page and confirm, wait for the green light to stop blinking (about 15 seconds), then unplug the power. The monitor starts again by itself the next time the Pi is powered on.
+
+If the button is missing or reports that it could not shut down, do it from a terminal on the laptop instead, with the Pi's username in place of `<user>`:
 
 ```bash
 ssh -t <user>@raspberrypi.local "sudo shutdown -h now"
 ```
 
-Type the Pi's password when asked, wait for the green light to stop blinking (about 15 seconds), then unplug the power. The monitor starts again by itself the next time the Pi is powered on.
+Type the Pi's password when asked, then wait for the green light as above.
 
 ## What changed in the code
 
@@ -39,9 +44,11 @@ Type the Pi's password when asked, wait for the green light to stop blinking (ab
 | `src/watch/camera.py` | New. `--camera pi` reads a Pi camera module through `rpicam-vid`, since OpenCV cannot open it by index. |
 | `src/watch/stream.py` | New. `--stream [PORT]` serves the monitor window to a browser as an MJPEG stream, with the keys and alarm sent through the page. |
 | `src/watch/live.py` | Uses the two modules above instead of calling `cv2.VideoCapture`, `cv2.imshow` and `cv2.waitKey` directly. |
-| `src/watch/__main__.py` | Adds `--camera pi` and `--stream [PORT]` to the `live` action. |
+| `src/watch/__main__.py` | Adds `--camera pi`, `--stream [PORT]` and `--allow-shutdown` to the `live` action. |
 | `scripts/setup-pi.sh` | New. Installs the runtime dependencies on a Pi, without the training extras. |
 | `scripts/watch-pi.service` | New. systemd user service that starts the monitor at boot. |
+| `scripts/watch-pi-poweroff.rules` | New. polkit rule that lets the **Shut down device** button power the Pi off without a password. |
+| `tests/test_stream.py` | New. Tests for the browser page's endpoints, with the power-off command mocked. |
 
 Without the new options, `live` behaves as before: `--camera N` opens an OpenCV camera and shows a desktop window.
 
@@ -116,6 +123,14 @@ systemctl --user enable --now watch.service && loginctl enable-linger
 
 The service expects the checkout at `~/watch`.
 
+The service runs the monitor with `--allow-shutdown`, which adds the **Shut down device** button to the page. Powering off normally needs a password, so the button only works once this rule is installed. **Pi** (asks for the sudo password):
+
+```bash
+sudo cp ~/watch/scripts/watch-pi-poweroff.rules /etc/polkit-1/rules.d/50-watch-poweroff.rules
+```
+
+The rule lets members of the `sudo` group power the machine off without a password. Without it the button reports that it could not shut down.
+
 ### 6. Allow a direct Ethernet cable (optional)
 
 By default the Pi's Ethernet port waits for a router to give it an address, so a cable straight to a laptop does not work. This makes the Pi also take a link-local address. **Pi** (asks for the sudo password):
@@ -175,6 +190,6 @@ Run `./scripts/setup-pi.sh` again only if `pyproject.toml` changed.
 ## Known limits
 
 - About 10 FPS on a Pi 4. Alert timing is measured in seconds, so the logic still holds, but the video is not smooth. Running the TFLite models in `models/` instead of the Keras ones should be faster and has not been done yet.
-- The page has no login. Anyone on the same network can view the camera and press the buttons, so use it on a trusted network only.
+- The page has no login. Anyone on the same network can view the camera and press the buttons, including **Shut down device**, so use it on a trusted network only.
 - Exported reports stay on the Pi; copy them off with `scp <user>@raspberrypi.local:~/watch/results/sessions/* .`.
 - `--stream` should also work on Windows and Linux with a normal webcam, but it has only been run on the Pi.

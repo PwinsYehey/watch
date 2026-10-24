@@ -28,7 +28,7 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 | `evaluate [eye\|yawn\|all]` | test-set report, confusion matrix and ROC curve in `results/<model>/` |
 | `benchmark [eye\|yawn\|all]` | inference latency and model size |
 | `export` | write `web/models/`, `web/config.js` and `models/*.tflite` |
-| `live` | webcam monitor (`--camera N`, or `--camera pi` for a Raspberry Pi camera module; `--stream [PORT]` to view it in a browser): `q` quit, `m` mute, `e` export a session report |
+| `live` | webcam monitor (`--camera N`, or `--camera pi` for a Raspberry Pi camera module; `--stream [PORT]` to view it in a browser, `--allow-shutdown` to add a power-off button there): `q` quit, `m` mute, `e` export a session report |
 | `web` | serve the browser demo at http://localhost:8765 (`--port N`) |
 | `predict <image>` | eye, mouth and head state for one photo |
 | `test` | run the unit tests (extra arguments go to pytest) |
@@ -57,7 +57,7 @@ A Pi with a camera module and no screen runs the same monitor and shows it in a 
 2. Run `./scripts/setup-pi.sh` once.
 3. Run `./scripts/live.sh --camera pi --stream` and open `http://<pi address>:8766` on the other machine.
 
-The page has buttons for mute, export and stop (the `m`, `e` and `q` keys also work), and plays the alarm once **Enable alarm sound** is clicked. Reports are saved on the Pi in `results/sessions/`.
+The page has buttons for mute, export and stop (the `m`, `e` and `q` keys also work), and plays the alarm once **Enable alarm sound** is clicked. With `--allow-shutdown` it also has a button that powers the Pi off. Reports are saved on the Pi in `results/sessions/`.
 
 The full walkthrough, with every command and a troubleshooting table, is in [docs/raspberry-pi.md](docs/raspberry-pi.md).
 

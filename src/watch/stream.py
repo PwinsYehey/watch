@@ -4,6 +4,7 @@ import http.server
 import json
 import queue
 import socket
+import subprocess
 import threading
 import time
 
@@ -11,6 +12,7 @@ import cv2
 
 NO_KEY = 0xFF
 KEYS = "qme"
+SHUTDOWN_COMMAND = ("systemctl", "poweroff")
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -24,6 +26,7 @@ PAGE = """<!doctype html>
   nav { padding: 12px; }
   button { margin: 0 4px; padding: 8px 14px; border: 1px solid #272c36; border-radius: 8px; background: #1d212a; color: inherit; font: inherit; cursor: pointer; }
   button.on { border-color: #00c800; color: #00c800; }
+  #shutdown { border-color: #dc0000; color: #ff4d4d; }
 </style>
 </head>
 <body>
@@ -33,7 +36,9 @@ PAGE = """<!doctype html>
   <button data-key="m">Mute / unmute alarm (M)</button>
   <button data-key="e">Export report (E)</button>
   <button data-key="q">Stop monitor (Q)</button>
+  <button id="shutdown" hidden>Shut down device</button>
 </nav>
+<p id="message"></p>
 <script>
   const send = (key) => fetch("/key/" + key, { method: "POST" });
   document.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => send(button.dataset.key)));
@@ -55,9 +60,17 @@ PAGE = """<!doctype html>
     tone.start();
     tone.stop(audio.currentTime + 0.25);
   }
+  const shutdown = document.getElementById("shutdown");
+  const message = document.getElementById("message");
+  shutdown.addEventListener("click", async () => {
+    if (!confirm("Shut down the device? It has to be unplugged and plugged back in to start again.")) return;
+    const response = await fetch("/shutdown", { method: "POST" });
+    message.textContent = response.ok ? "Shutting down. Wait for the green light to stop blinking, then unplug the power." : "Could not shut down: " + (await response.text());
+  });
   setInterval(async () => {
     try {
       const state = await (await fetch("/state")).json();
+      shutdown.hidden = !state.shutdown;
       if (state.alarm && audio) beep();
     } catch (error) {}
   }, 500);
@@ -95,8 +108,9 @@ class Window:
 class BrowserStream:
     """The same view as an MJPEG stream on a web page, with keys sent back from the page."""
 
-    def __init__(self, port: int, alarm_active):
+    def __init__(self, port: int, alarm_active, allow_shutdown: bool = False):
         self._view, self._count = None, 0
+        self._allow_shutdown = allow_shutdown
         self._updated = threading.Condition()
         self._keys = queue.SimpleQueue()
         self._alarm_active = alarm_active
@@ -150,7 +164,7 @@ class BrowserStream:
                 if self.path == "/":
                     self._send(200, "text/html; charset=utf-8", PAGE.encode())
                 elif self.path == "/state":
-                    self._send(200, "application/json", json.dumps({"alarm": bool(stream._alarm_active())}).encode())
+                    self._send(200, "application/json", json.dumps({"alarm": bool(stream._alarm_active()), "shutdown": stream._allow_shutdown}).encode())
                 elif self.path == "/stream":
                     self.send_response(200)
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
@@ -169,6 +183,12 @@ class BrowserStream:
                 if self.path.startswith("/key/") and len(key) == 1 and key in KEYS:
                     stream._keys.put(key)
                     self._send(204)
+                elif self.path == "/shutdown" and stream._allow_shutdown:
+                    result = subprocess.run(SHUTDOWN_COMMAND, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        self._send(204)
+                    else:
+                        self._send(500, body=(result.stderr.strip() or "not permitted").encode())
                 else:
                     self._send(404)
 

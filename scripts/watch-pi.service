@@ -7,7 +7,7 @@ Description=WATCH live alertness monitor
 [Service]
 WorkingDirectory=%h/watch
 Environment=PYTHONUNBUFFERED=1
-ExecStart=%h/watch/scripts/live.sh --camera pi --stream
+ExecStart=%h/watch/scripts/live.sh --camera pi --stream --allow-shutdown
 Restart=always
 RestartSec=5
 
