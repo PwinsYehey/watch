@@ -53,13 +53,15 @@ All thresholds live in `configs/config.yaml`; run `export` after changing them s
 
 A Pi with a camera module and no screen runs the same monitor and shows it in a browser on another machine:
 
-1. Connect the camera ribbon with the Pi powered off, then check it with `rpicam-hello --list-cameras`.
+1. Connect the camera ribbon with the Pi powered off, then check it with `rpicam-hello --list-cameras`. An IMX219 camera may need a boot setting first; see the guide.
 2. Run `./scripts/setup-pi.sh` once.
 3. Run `./scripts/live.sh --camera pi --stream` and open `http://<pi address>:8766` on the other machine.
 
 The page has buttons for mute, export and stop (the `m`, `e` and `q` keys also work), and plays the alarm once **Enable alarm sound** is clicked. With `--allow-shutdown` it also has a button that powers the Pi off. Reports are saved on the Pi in `results/sessions/`.
 
-The full walkthrough, with every command and a troubleshooting table, is in [docs/raspberry-pi.md](docs/raspberry-pi.md).
+The hardware in use is a Raspberry Pi 4 Model B (8 GB), a 32 GB microSD card and an IMX219 night vision camera with two IR LED modules. The picture is black and white with lowered exposure, so a face near the IR LEDs stays readable.
+
+The full walkthrough, with the hardware, step-by-step use, every command, a troubleshooting table and the known limits, is in [docs/raspberry-pi.md](docs/raspberry-pi.md).
 
 To start the monitor whenever the Pi boots, install [scripts/watch-pi.service](scripts/watch-pi.service) as described at the top of that file. The service restarts the monitor if it stops, so **Stop monitor** then acts as a restart; use `systemctl --user stop watch.service` to stop it for good.
 

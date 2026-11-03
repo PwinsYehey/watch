@@ -1,17 +1,44 @@
 # WATCH on a Raspberry Pi
 
-How to run the live monitor on a Raspberry Pi with a camera module and watch it from a browser on a laptop.
+How to run the live monitor on a Raspberry Pi with a camera module and watch it from a browser on a laptop. The Pi needs no screen.
 
-Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie) and a Camera Module 3 NoIR. It runs at about 10 FPS with a face in view.
+Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie). It runs at about 10 to 17 FPS with a face in view.
+
+## Hardware
+
+| Part | Details | What it does |
+|---|---|---|
+| Raspberry Pi 4 Model B | 8 GB RAM | Runs the monitor, the models and the web page. |
+| microSD card | 32 GB | Holds the OS, the project, the Python environment and the session reports. |
+| IMX219 night vision camera | 8 MP, 160 degree lens, no IR filter, with two IR LED modules that take power through the camera's screw holes | The camera in use. It needs the setting in [Connect the camera](#1-connect-the-camera). |
+| Camera ribbon | Same width at both ends | Connects the camera to the **CAMERA** connector. Ribbons with one narrow end are for a Pi 5 or Zero and do not fit a Pi 4 directly. |
+| USB-C power supply | 5 V 3 A wall adapter | A laptop USB port may not supply enough, and a weak supply can make the Pi reboot or drop off the network. |
+| Heatsink or small fan | Recommended | The Pi reached about 71 C under load with the IR modules on. It starts slowing down at 80 C. |
+| Ethernet cable | Optional, with a USB adapter if the laptop has no port | Connects the Pi straight to a laptop when there is no shared Wi-Fi. |
+
+### Camera Module 3 NoIR
+
+The project was first run on a Camera Module 3 NoIR (`imx708_noir`, 12 MP, autofocus), and it also works without the IMX219 setting below.
+
+IR LED boards bought for night vision cameras get no power when screwed onto this camera, because the official module does not put power on its screw holes. They need their own wires from the Pi's 3.3 V and ground pins, and the board and camera should be checked with a multimeter first so the + pad cannot short to the camera. This wiring has not been done or tested.
+
+### Which light it is for
+
+The IR modules light the face without bothering the person, and a camera with no IR filter can see that light. Eyes were visible through a pair of tinted shades this way, but the monitor has not yet been tested reading eyes through shades or a tinted visor. See [Known limits](#known-limits).
 
 ## Quick test (Pi already set up)
 
-1. Power the Pi and wait about a minute.
+1. Plug in the Pi's power and wait about a minute. The monitor starts by itself.
 2. Connect to it one of two ways:
    - **Same Wi-Fi** as the Pi, or
    - **Ethernet cable** straight from the Pi to the laptop. No router or laptop setup is needed; allow up to a minute after plugging in.
-3. Open **http://raspberrypi.local:8766** in a browser.
-4. Look at the camera for the 4-second calibration, then close your eyes, yawn or drop your head to see WARNING and CRITICAL.
+3. Open **http://raspberrypi.local:8766** in a browser. If the name is not found, use the Pi's address: `http://<address>:8766`.
+4. Fix the camera in place, level with the face and about 50 to 70 cm away, with the whole face including the chin in the picture.
+5. Look straight at the camera with your eyes open and hold still for the 4-second calibration.
+6. Close your eyes, yawn or drop your head to see WARNING and CRITICAL.
+7. When you are done, click **Shut down device**, confirm, wait for the green light to stop blinking, then unplug the power.
+
+To calibrate again, move out of view for at least 3 seconds and come back. Do this whenever the camera has moved, because the head limits depend on where the camera is.
 
 On the page:
 
@@ -22,6 +49,12 @@ On the page:
 | Export report | `E` | Saves a PNG graph and CSV log on the Pi in `~/watch/results/sessions/`. |
 | Stop monitor | `Q` | Stops the monitor. When it runs as a service it restarts after 5 seconds and recalibrates. |
 | Shut down device | | Powers the Pi off after a confirmation. Only shown when the monitor runs with `--allow-shutdown`. |
+
+### Reading the alerts
+
+- One event, such as a yawn lasting 2 seconds, gives a WARNING. The warning stays for 30 seconds after the event, even once the mouth has closed, so that repeats can add up. The **Yawn** row under Signs shows what the mouth is doing now.
+- A repeat, a second sign, or closed eyes or a dropped head that persist make it CRITICAL. CRITICAL drops to a "recovering" warning after 5 calm seconds.
+- These times are `window_sec` and `calm_sec` in `configs/config.yaml`.
 
 ### Turning it off
 
@@ -41,16 +74,16 @@ Type the Pi's password when asked, then wait for the green light as above.
 
 | File | Change |
 |---|---|
-| `src/watch/camera.py` | New. `--camera pi` reads a Pi camera module through `rpicam-vid`, since OpenCV cannot open it by index. |
+| `src/watch/camera.py` | New. `--camera pi` reads a Pi camera module through `rpicam-vid`, since OpenCV cannot open it by index. It meters on the centre of the picture, lowers the exposure one step and removes the colour, so a face near the IR LEDs is not washed out or pink. |
 | `src/watch/stream.py` | New. `--stream [PORT]` serves the monitor window to a browser as an MJPEG stream, with the keys and alarm sent through the page. |
-| `src/watch/live.py` | Uses the two modules above instead of calling `cv2.VideoCapture`, `cv2.imshow` and `cv2.waitKey` directly. |
+| `src/watch/live.py` | Uses the two modules above instead of calling `cv2.VideoCapture`, `cv2.imshow` and `cv2.waitKey` directly. An open eye shape now overrules the eye model unless there is glare, because the model called open eyes closed on this camera's soft IR picture. This applies to every camera. |
 | `src/watch/__main__.py` | Adds `--camera pi`, `--stream [PORT]` and `--allow-shutdown` to the `live` action. |
 | `scripts/setup-pi.sh` | New. Installs the runtime dependencies on a Pi, without the training extras. |
 | `scripts/watch-pi.service` | New. systemd user service that starts the monitor at boot. |
 | `scripts/watch-pi-poweroff.rules` | New. polkit rule that lets the **Shut down device** button power the Pi off without a password. |
 | `tests/test_stream.py` | New. Tests for the browser page's endpoints, with the power-off command mocked. |
 
-Without the new options, `live` behaves as before: `--camera N` opens an OpenCV camera and shows a desktop window.
+Without the new options, `live` opens an OpenCV camera with `--camera N` and shows a desktop window as before.
 
 ## First-time setup
 
@@ -61,13 +94,26 @@ Commands marked **Pi** run on the Pi over SSH (`ssh <user>@raspberrypi.local`). 
 1. Shut the Pi down and unplug its power. Never connect the ribbon while it is powered.
 2. On a Pi 4, use the **CAMERA** connector between the HDMI ports and the audio jack, not **DISPLAY**.
 3. Lift the connector's clip by its two ends, slide the ribbon in with the metal contacts facing the HDMI ports, and push the clip back down.
-4. Power the Pi on and check that it sees the camera. **Pi:**
+4. Do the same at the camera's connector, with the blue strip facing away from the board. Check that the ribbon is straight and does not slide out with a light tug.
+5. For an IMX219 camera, the Pi may not detect the board by itself, so tell it which camera is connected. **Pi** (asks for the sudo password, then reboots):
+
+   ```bash
+   sudo sed -i 's/^camera_auto_detect=1/camera_auto_detect=0/' /boot/firmware/config.txt && echo dtoverlay=imx219 | sudo tee -a /boot/firmware/config.txt && sudo reboot
+   ```
+
+   Skip this step for a Camera Module 3. To switch back to one later, undo it and reboot:
+
+   ```bash
+   sudo sed -i -e 's/^camera_auto_detect=0/camera_auto_detect=1/' -e '/^dtoverlay=imx219$/d' /boot/firmware/config.txt && sudo reboot
+   ```
+
+6. Power the Pi on and check that it sees the camera. **Pi:**
 
    ```bash
    rpicam-hello --list-cameras
    ```
 
-   A Camera Module 3 NoIR is listed as `imx708_noir`.
+   An IMX219 camera is listed as `imx219`, and a Camera Module 3 NoIR as `imx708_noir`.
 
 ### 2. Copy the project to the Pi
 
@@ -163,6 +209,16 @@ All on the **Pi**.
 
 Only one program can use the camera at a time, so stop the service before running `live` by hand or using `rpicam-hello`.
 
+## Changing the picture
+
+The exposure and colour settings are in the `rpicam-vid` command in `src/watch/camera.py`. Restart the service after changing them.
+
+| Setting | Now | Effect |
+|---|---|---|
+| `--ev` | `-1` | Lower is darker. At `-2` the face was too dim and the eye model misread it; with no lowering the IR LEDs washed the face out. |
+| `--saturation` | `0` | Black and white. In colour, the camera's lack of an IR filter turned the face solid pink and the eyes could not be read. |
+| `--metering` | `spot` | Sets the brightness from the centre of the picture, where the face should be. |
+
 ## Updating the code on the Pi
 
 Repeat step 2 to copy the new version over, then restart. **Pi:**
@@ -179,17 +235,29 @@ Run `./scripts/setup-pi.sh` again only if `pyproject.toml` changed.
 |---|---|
 | The page does not load | Give the Pi a minute after power-on. Check `systemctl --user status watch.service`. Over a cable, wait up to a minute after plugging in. |
 | `raspberrypi.local` is not found | The laptop may block mDNS (some managed machines and firewalls do). Find the Pi's address with `hostname -I` on the Pi and use `http://<address>:8766`. |
+| `No cameras available!` or `Could not open camera pi` | The page stays down because the monitor keeps restarting without a camera. Reseat the ribbon at both ends with the Pi powered off. For an IMX219 camera, apply the setting in step 1. |
 | Black video, "NO FACE DETECTED" | The lens is covered or pointing away, or the room is too dark. |
-| "Lighting: low, boosted" | Add light on the face. A NoIR camera also works with an infrared lamp, including in the dark. |
-| "CAMERA LOST" | The ribbon is loose, or another program is using the camera. Reseat it with the Pi powered off. |
-| `Could not open camera pi` | `rpicam-hello --list-cameras` should list a camera; if not, reseat the ribbon. |
+| The picture is pink or blue | Colour is set by `--saturation` in `src/watch/camera.py`, and `0` removes it. |
+| The face is washed out and "Eyes: 0 of 2 readable" | Too much IR on the face. Move back or angle the IR modules. |
+| "Lighting: low, boosted" | Add light on the face. A lamp from the front or a window you are facing works. |
+| "Sharpness: blurry" | Sit 50 to 70 cm back and hold still. If it stays soft, power off and try a very small twist of the lens if it turns easily; some are glued, so do not force it. |
+| "CAMERA LOST" | No new picture arrived for 2 seconds. The ribbon may be loose, another program may be using the camera, or the IR modules may be drawing too much power. Reseat the ribbon with the Pi powered off, then try one IR module. |
+| It says the head is drooped while upright | It calibrated while the camera was moving. Fix the camera in place and calibrate again. |
 | The Pi reboots or drops off the network under load | Power it from a 5 V 3 A supply rather than a laptop USB port. `vcgencmd get_throttled` shows anything other than `0x0` after an undervoltage. |
+| The Pi gets too hot | Add a heatsink or fan, keep air moving under the board and run shorter tests. |
 | No alarm sound | Click **Enable alarm sound** on the page; it has to be clicked again after a reload. |
-| It keeps recalibrating | The face left the view for 3 seconds or more (`recalibrate_gap_sec` in `configs/config.yaml`). Mount the camera so the face stays in frame. |
+| It keeps recalibrating | The face or camera was lost for 3 seconds or more (`recalibrate_gap_sec` in `configs/config.yaml`). Mount the camera so the face stays in frame. |
 
 ## Known limits
 
-- About 10 FPS on a Pi 4. Alert timing is measured in seconds, so the logic still holds, but the video is not smooth. Running the TFLite models in `models/` instead of the Keras ones should be faster and has not been done yet.
+- **Not finished for a tinted visor.** Eyes were visible through tinted shades on the camera, but the monitor has not been tested reading them through shades or a visor.
+- **Daytime use is the current target.** Working in full darkness has not been tested.
+- **The open-eye change has not been tested on a face yet.** The change in `live.py` passes the unit tests, but no one has confirmed yet that it stops the false alarm while still catching closed eyes.
+- **The mouth is often "not readable" on the IMX219 camera,** so yawn alerts are not reliable yet. The yawn model was trained on colour video and the picture is now black and white.
+- **The camera sometimes stalls.** "CAMERA LOST" came up about 4 times in 5 minutes with both IR modules on, and the cause is not known. Each one can also trigger a recalibration.
+- **The picture is still a little soft,** which may be the lens focus or the small 640x480 frame.
+- **The Pi runs hot** with no cooling, so keep sessions short until a heatsink or fan is fitted.
+- About 10 to 17 FPS on a Pi 4. Alert timing is measured in seconds, so the logic still holds, but the video is not smooth. Running the TFLite models in `models/` instead of the Keras ones should be faster and has not been done yet.
 - The page has no login. Anyone on the same network can view the camera and press the buttons, including **Shut down device**, so use it on a trusted network only.
 - Exported reports stay on the Pi; copy them off with `scp <user>@raspberrypi.local:~/watch/results/sessions/* .`.
 - `--stream` should also work on Windows and Linux with a normal webcam, but it has only been run on the Pi.

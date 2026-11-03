@@ -203,8 +203,11 @@ class LiveMonitor:
         _, confidence, cnn_closed = prediction
         if confidence < self.settings["min_cnn_confidence"]:
             return None
-        ear_closed = eye.ratio <= self.ear["closed_threshold"] and glare_fraction(frame, eye.box) < self.settings["ear_glare_tolerance"]
-        closedness = self.smoothers[side].add(max(float(ear_closed), cnn_closed))
+        glare = glare_fraction(frame, eye.box) >= self.settings["ear_glare_tolerance"]
+        shape_closed = eye.ratio <= self.ear["closed_threshold"]
+        # An open eye shape overrules the CNN, which misreads soft IR crops as closed, unless glare makes the shape unreliable.
+        cnn_score = cnn_closed if shape_closed or glare else 0.0
+        closedness = self.smoothers[side].add(max(float(shape_closed and not glare), cnn_score))
         return {"score": closedness, "label": "closed" if closedness >= 0.5 else "open", "ratio": eye.ratio}
 
     def _mouth(self, mouth):
