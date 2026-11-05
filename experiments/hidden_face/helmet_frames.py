@@ -15,8 +15,8 @@ from watch.model import Classifier
 POSE = mp.solutions.pose.PoseLandmark
 FIELDS = [
     "folder", "session", "index", "face", "pose", "nose_vis", "ear_l_vis", "ear_r_vis", "ear_line_deg", "nose_drop",
-    "shoulder_tilt", "left_closed", "left_conf", "left_ear", "left_glare", "left_mean", "left_std",
-    "right_closed", "right_conf", "right_ear", "right_glare", "right_mean", "right_std",
+    "shoulder_tilt", "left_label", "left_closed", "left_conf", "left_ear", "left_glare", "left_mean", "left_std",
+    "right_label", "right_closed", "right_conf", "right_ear", "right_glare", "right_mean", "right_std",
     "mouth_open", "mouth_conf", "mar", "pitch", "roll",
 ]
 
@@ -79,8 +79,8 @@ if __name__ == "__main__":
                 for side, ids in (("left", LEFT_EYE_IDS), ("right", RIGHT_EYE_IDS)):
                     row[f"{side}_mean"], row[f"{side}_std"], row[f"{side}_glare"] = eye_stats(frame, gray, regions.landmarks, ids)
                 if regions.eyes:
-                    for (side, eye), (_, conf, closed) in zip(regions.eyes.items(), eye_model.predict_many([e.crop for e in regions.eyes.values()])):
-                        row[f"{side}_closed"], row[f"{side}_conf"], row[f"{side}_ear"] = closed, conf, eye.ratio
+                    for (side, eye), (label, conf, closed) in zip(regions.eyes.items(), eye_model.predict_many([e.crop for e in regions.eyes.values()])):
+                        row[f"{side}_label"], row[f"{side}_closed"], row[f"{side}_conf"], row[f"{side}_ear"] = label, closed, conf, eye.ratio
                 if regions.mouth:
                     _, conf, opened = yawn_model.predict(regions.mouth.crop)
                     row["mouth_open"], row["mouth_conf"], row["mar"] = opened, conf, regions.mouth.ratio

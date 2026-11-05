@@ -300,7 +300,7 @@ function cropInput(sourceCanvas, crop, desaturate) {
 }
 
 // Mirrors Classifier.predict in src/watch/model.py, running all of one model's crops as a single batch.
-async function predictCrops(model, sourceCanvas, crops, classNames, positiveClass, desaturate = false) {
+async function predictCrops(model, sourceCanvas, crops, classNames, positiveClass, desaturate = false, unreadable = null) {
   const present = crops.filter(Boolean);
   if (!present.length) return crops.map(() => null);
   const output = tf.tidy(() => model.predict(tf.stack(present.map((crop) => cropInput(sourceCanvas, crop, desaturate)))));
@@ -310,7 +310,17 @@ async function predictCrops(model, sourceCanvas, crops, classNames, positiveClas
   let row = 0;
   return crops.map((crop) => {
     if (!crop) return null;
-    const prediction = Array.from(values.slice(row * size, ++row * size));
+    let prediction = Array.from(values.slice(row * size, ++row * size));
+    if (unreadable) {
+      const index = classNames.indexOf(unreadable.className);
+      const unreadableProbability = prediction[index];
+      prediction[index] = 0;
+      const total = prediction.reduce((a, b) => a + b, 0) || 1e-9;
+      prediction = prediction.map((p) => p / total);
+      if (unreadableProbability >= unreadable.threshold) {
+        return { label: unreadable.className, confidence: unreadableProbability, positiveProbability: prediction[classNames.indexOf(positiveClass)] };
+      }
+    }
     const predictedIndex = prediction.indexOf(Math.max(...prediction));
     return {
       label: classNames[predictedIndex],
@@ -322,7 +332,7 @@ async function predictCrops(model, sourceCanvas, crops, classNames, positiveClas
 
 async function predictRegions(regions, eyeModel, yawnModel) {
   const [[left, right], [mouth]] = await Promise.all([
-    predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true),
+    predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true, CONFIG.eyeUnreadable),
     predictCrops(yawnModel, glareCleanCanvas, [regions.mouth?.crop], CONFIG.yawnClassNames, "yawn"),
   ]);
   return { left, right, mouth };
@@ -508,8 +518,8 @@ function drawHeadAxis(landmarks, color) {
 }
 
 function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
-  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
-  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  const { label: cnnLabel, confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
+  if (cnnLabel === "blocked" || cnnConfidence < CONFIG.live.minCnnConfidence) return null;
   if (cnnClosedness >= 0.5 && ear > (earCfg.openThreshold + earCfg.closedThreshold) / 2) return null;
 
   // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.

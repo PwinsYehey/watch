@@ -202,8 +202,8 @@ class LiveMonitor:
         self._reset()
 
     def _eye(self, frame, side, eye, prediction):
-        _, confidence, cnn_closed = prediction
-        if confidence < self.settings["min_cnn_confidence"]:
+        label, confidence, cnn_closed = prediction
+        if label == "blocked" or confidence < self.settings["min_cnn_confidence"]:
             return None
         if cnn_closed >= 0.5 and eye.ratio > (self.ear["open_threshold"] + self.ear["closed_threshold"]) / 2:
             return None

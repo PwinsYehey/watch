@@ -23,8 +23,8 @@ def build_mrl_eye(root: Path) -> pd.DataFrame:
     entries = []
     for path in _images(root):
         parts = path.stem.split("_")
-        if len(parts) >= 5 and parts[4] in ("0", "1"):
-            entries.append((path, parts[0], "eyes_opened" if parts[4] == "1" else "eyes_closed"))
+        if len(parts) >= 5 and parts[4] in ("0", "1", "b"):
+            entries.append((path, parts[0], {"0": "eyes_closed", "1": "eyes_opened", "b": "blocked"}[parts[4]]))
     return _rows("mrl_eye", entries)
 
 
@@ -33,7 +33,7 @@ def build_cew(root: Path) -> pd.DataFrame:
     entries = []
     for path in _images(root):
         folder = path.parent.name.lower()
-        label = "eyes_closed" if "closed" in folder else "eyes_opened" if "open" in folder else None
+        label = "blocked" if "blocked" in folder else "eyes_closed" if "closed" in folder else "eyes_opened" if "open" in folder else None
         if label:
             entries.append((path, path.stem.removesuffix("_L").removesuffix("_R"), label))
     return _rows("cew", entries)
@@ -47,11 +47,15 @@ def build_nthu_eye(root: Path) -> pd.DataFrame:
     return _build_labeled_folders("nthu_eye", root, {"open": "eyes_opened", "closed": "eyes_closed"})
 
 
+def build_yawdd_eye(root: Path) -> pd.DataFrame:
+    return _build_labeled_folders("yawdd_eye", root, {"open": "eyes_opened", "closed": "eyes_closed", "blocked": "blocked"})
+
+
 def build_yawdd(root: Path) -> pd.DataFrame:
     return _build_labeled_folders("yawdd", root, {"yawn": "yawn", "no_yawn": "no_yawn"})
 
 
-BUILDERS = {"mrl_eye": build_mrl_eye, "cew": build_cew, "nthu_eye": build_nthu_eye, "yawdd": build_yawdd}
+BUILDERS = {"mrl_eye": build_mrl_eye, "cew": build_cew, "nthu_eye": build_nthu_eye, "yawdd_eye": build_yawdd_eye, "yawdd": build_yawdd}
 
 
 def build_manifest(name: str) -> pd.DataFrame:

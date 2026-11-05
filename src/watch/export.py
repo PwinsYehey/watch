@@ -27,6 +27,7 @@ def web_config_js() -> str:
         "imageSize": config["image_size"],
         "eyeClassNames": config["models"]["eye"]["class_names"],
         "yawnClassNames": config["models"]["yawn"]["class_names"],
+        "eyeUnreadable": {"className": config["models"]["eye"]["unreadable_class"], "threshold": config["models"]["eye"]["unreadable_threshold"]},
         **{_camel(section): _camelize(config[section]) for section in WEB_CONFIG_SECTIONS},
     }
     return f"// Generated from configs/config.yaml by ./scripts/export.sh, do not edit.\nconst CONFIG = {json.dumps(web_config, indent=2)};\n"

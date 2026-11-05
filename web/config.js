@@ -6,12 +6,17 @@ const CONFIG = {
   ],
   "eyeClassNames": [
     "eyes_closed",
-    "eyes_opened"
+    "eyes_opened",
+    "blocked"
   ],
   "yawnClassNames": [
     "no_yawn",
     "yawn"
   ],
+  "eyeUnreadable": {
+    "className": "blocked",
+    "threshold": 0.9
+  },
   "alertness": {
     "closedDurationThresholdSec": 1.5,
     "perclosWindowSec": 5.0,

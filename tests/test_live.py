@@ -51,3 +51,7 @@ def test_yawn_on_a_closed_mouth_means_the_mouth_is_covered():
 
 def test_real_yawn_still_counts():
     assert _monitor(yawn_open=0.95)._mouth(SimpleNamespace(crop=None, ratio=0.7))["label"] == "yawn"
+
+
+def test_eye_the_model_calls_blocked_is_unreadable():
+    assert _monitor()._eye(FRAME, "left", _eye(0.30), ("blocked", 0.9, 0.05)) is None
