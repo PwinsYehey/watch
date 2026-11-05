@@ -746,7 +746,7 @@ async function calibrate(faceLandmarker, trackBody, durationSec, closedOffset, d
       earSamples.push(eyeAspectRatio(lm, canvas.width, canvas.height, LEFT_EYE_EAR_POINTS));
       earSamples.push(eyeAspectRatio(lm, canvas.width, canvas.height, RIGHT_EYE_EAR_POINTS));
       if (result.facialTransformationMatrixes.length) {
-        const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+        const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data, lm, canvas.width, canvas.height);
         pitchSamples.push(headPose.pitch);
         rollSamples.push(headPose.roll);
       }
@@ -999,7 +999,7 @@ async function main() {
         eyeClosedness = eyeClosednessOf([leftResult, rightResult]);
         mouthOpenness = mouthResult ? mouthResult.openness : null;
         if (result.facialTransformationMatrixes.length) {
-          const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+          const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data, lm, w, h);
           headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
           headDroop = headResult?.droop ?? null;
         }
@@ -1178,7 +1178,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   const mouth = regions.mouth ? drawMouth(predictions.mouth, mouthAspectRatio(lm, w, h), lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
-    const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+    const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data, lm, w, h);
     head = headPoseStatus(headPose.pitch, headPose.roll, lm);
   }
   const eyeClosedness = eyeClosednessOf([left, right]);

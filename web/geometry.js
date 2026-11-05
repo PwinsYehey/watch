@@ -91,7 +91,7 @@ function alignedCropFromLandmarks(landmarks, ids, axis, w, h, margin, square = f
 }
 
 // Approximates the solvePnP head pose from MediaPipe's transform matrix, in degrees.
-function headPoseFromTransformMatrix(data) {
+function headPoseFromTransformMatrix(data, landmarks, w, h) {
   const r = [data[0], data[1], data[2], data[4], data[5], data[6], data[8], data[9], data[10]];
   const sy = Math.sqrt(r[0] * r[0] + r[3] * r[3]);
   const pitchRad = sy < 1e-6 ? Math.atan2(-r[5], r[4]) : Math.atan2(r[7], r[8]);
@@ -100,10 +100,12 @@ function headPoseFromTransformMatrix(data) {
   // Flip the sign so nodding forward increases pitch, as in live.py.
   const pitch = -normalized;
 
-  const rollRad = Math.atan2(r[3], r[0]);
-  const roll = Math.abs((rollRad * 180) / Math.PI);
+  return { pitch, roll: eyeLineRoll(landmarks, w, h) };
+}
 
-  return { pitch, roll };
+function eyeLineRoll(landmarks, w, h) {
+  const a = landmarks[LEFT_EYE_AXIS[0]], b = landmarks[RIGHT_EYE_AXIS[1]];
+  return Math.abs((Math.atan2((b.y - a.y) * h, (b.x - a.x) * w) * 180) / Math.PI);
 }
 
 // Mirrors shoulders and body_slump in src/watch/body.py.
