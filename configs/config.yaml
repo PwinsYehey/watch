@@ -94,6 +94,14 @@ nod:
   closedness_threshold: 1.0
   dip_grace_period_sec: 0.0
 
+# Upper-body posture from the shoulders, against the calibrated sitting posture. Shown on the dashboard only for now.
+body:
+  every_n_frames: 3
+  min_visibility: 0.5
+  # Slumped once the shoulders drop this many shoulder widths, or the shoulder line tilts this far past calibration.
+  drop_limit: 0.5
+  lean_limit_deg: 20.0
+
 # Defaults used until per-user calibration replaces them.
 ear:
   open_threshold: 0.35

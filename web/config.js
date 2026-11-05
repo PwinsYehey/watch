@@ -66,6 +66,12 @@ const CONFIG = {
       "head": 2
     }
   },
+  "body": {
+    "everyNFrames": 3,
+    "minVisibility": 0.5,
+    "dropLimit": 0.5,
+    "leanLimitDeg": 20.0
+  },
   "live": {
     "minCnnConfidence": 0.65,
     "earGlareTolerance": 0.15,
