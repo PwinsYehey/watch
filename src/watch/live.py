@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from watch import dashboard as ui
-from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian, head_droop
+from watch.alertness import AlertnessMonitor, CheckInMonitor, EscalationMonitor, RollingMedian, head_droop
 from watch.body import BodyPose, BodyTracker, body_slump
 from watch.config import load_config
 from watch.report import LEVEL_NAMES, SessionLog
@@ -71,6 +71,15 @@ class Alarm:
     def set(self, active: bool):
         self._active.set() if active else self._active.clear()
 
+    @staticmethod
+    def beep():
+        if sys.platform == "win32":
+            import winsound
+
+            threading.Thread(target=winsound.Beep, args=(660, 400), daemon=True).start()
+        else:
+            print("\a", end="", flush=True)
+
     def _loop(self):
         while True:
             self._active.wait()
@@ -102,6 +111,7 @@ class LiveMonitor:
         self.events = deque(maxlen=50)
         self.calibrated = False
         self.muted = False
+        self._answered = False
         self.session = SessionLog()
         self._notice, self._notice_until = "", 0.0
         self._last_frame = None
@@ -112,6 +122,7 @@ class LiveMonitor:
         self.smoothers = {key: RollingMedian(window) for key in ("left", "right", "eyes", "mouth", "head", "body")}
         self.monitors = {key: AlertnessMonitor(**self.config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"), ("body", "slump"))}
         self.escalation = EscalationMonitor(**self.config["escalation"])
+        self.check_in = CheckInMonitor(**self.config["check_in"])
         self._level = 0
 
     def _read(self):
@@ -129,6 +140,8 @@ class LiveMonitor:
             self.muted = not self.muted
         if key == ord("e"):
             self.export()
+        if key == ord(" "):
+            self._answered = True
 
     def _camera_lost(self):
         lost_since, next_retry = time.time(), 0.0
@@ -284,7 +297,7 @@ class LiveMonitor:
                 cv2.circle(frame, p, 6, color, -1, cv2.LINE_AA)
 
         level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness, sharpness)
-        notice = self._notice if time.time() < self._notice_until else ""
+        notice = "CHECK-IN: press SPACE" if self.check_in.asking else self._notice if time.time() < self._notice_until else ""
         return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings, notice=notice)
 
     def _dashboard(self, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
@@ -425,6 +438,16 @@ class LiveMonitor:
 
                 now = time.time()
                 statuses = {key: self.monitors[key].update(self.smoothers[key].add(score), now) for key, score in scores.items()}
+                was_asking = self.check_in.asking
+                statuses["check_in"] = self.check_in.update(scores["eyes"] is not None, regions is not None or body is not None, self._answered, now)
+                self._answered = False
+                if self.check_in.asking and not was_asking:
+                    Alarm.beep()
+                    self.events.append((time.strftime("%H:%M:%S"), 0, "check-in asked"))
+                    self.session.event("Check-in asked")
+                elif self.check_in.just_answered:
+                    self.events.append((time.strftime("%H:%M:%S"), 0, f"check-in answered in {self.check_in.last_reaction:.1f}s"))
+                    self.session.event(f"Check-in answered in {self.check_in.last_reaction:.1f}s")
                 escalation = self.escalation.update(statuses, regions is not None or body is not None, now)
                 self.alarm.set(escalation.level == 2 and not self.muted)
                 if escalation.level != self._level:

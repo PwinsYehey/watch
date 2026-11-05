@@ -201,6 +201,8 @@ const cameraIcon = document.getElementById("cameraIcon");
 const liveDot = document.getElementById("liveDot");
 const uploadBtn = document.getElementById("uploadBtn");
 const muteBtn = document.getElementById("muteBtn");
+const checkInBtn = document.getElementById("checkInBtn");
+let checkInAnswered = false;
 const exportBtn = document.getElementById("exportBtn");
 let session = new SessionLog();
 let sessionLevel = 0;
@@ -260,6 +262,18 @@ function startAlarm() {
     on = !on;
     alarmGain.gain.value = on ? 1.0 : 0.0;
   }, 250);
+}
+
+function checkInBeep() {
+  if (muted) return;
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const tone = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  tone.frequency.value = 660;
+  gain.gain.value = 0.6;
+  tone.connect(gain).connect(audioCtx.destination);
+  tone.start();
+  tone.stop(audioCtx.currentTime + 0.4);
 }
 
 function stopAlarm() {
@@ -924,7 +938,7 @@ async function main() {
   muteBtn.hidden = false;
 
   let eyeSmoother, leftEyeSmoother, rightEyeSmoother, mouthSmoother, headSmoother, bodySmoother;
-  let eyeMonitor, yawnMonitor, nodMonitor, slumpMonitor, escalationMonitor;
+  let eyeMonitor, yawnMonitor, nodMonitor, slumpMonitor, checkInMonitor, escalationMonitor;
 
   // Mirrors LiveMonitor._reset in src/watch/live.py: a fresh start after every calibration.
   function resetMonitors() {
@@ -956,6 +970,7 @@ async function main() {
       closednessThreshold: CONFIG.nod.closednessThreshold,
       dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
     });
+    checkInMonitor = new CheckInMonitor(CONFIG.checkIn.blindSec, CONFIG.checkIn.answerSec);
     slumpMonitor = new AlertnessMonitor({
       closedDurationThreshold: CONFIG.slump.closedDurationThresholdSec,
       perclosWindow: CONFIG.slump.perclosWindowSec,
@@ -1041,7 +1056,21 @@ async function main() {
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
       const slumpStatus = slumpMonitor.update(bodySmoother.add(!faceFound && bodyResult && bodyBase ? bodyResult.score : null), now);
 
-      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus, body: slumpStatus }, faceFound || bodyResult !== null, now);
+      const wasAsking = checkInMonitor.asking;
+      const checkInStatus = checkInMonitor.update(eyeClosedness !== null, faceFound || bodyResult !== null, checkInAnswered, now);
+      checkInAnswered = false;
+      const stamp = new Date().toLocaleTimeString([], { hour12: false });
+      if (checkInMonitor.asking && !wasAsking) {
+        checkInBeep();
+        dashEvents.unshift({ time: stamp, level: 0, reason: "check-in asked" });
+        session.event("Check-in asked");
+      } else if (checkInMonitor.justAnswered) {
+        dashEvents.unshift({ time: stamp, level: 0, reason: `check-in answered in ${checkInMonitor.lastReaction.toFixed(1)}s` });
+        session.event(`Check-in answered in ${checkInMonitor.lastReaction.toFixed(1)}s`);
+      }
+      checkInBtn.hidden = !checkInMonitor.asking;
+
+      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus, body: slumpStatus, checkIn: checkInStatus }, faceFound || bodyResult !== null, now);
       if (escalation.level !== sessionLevel) {
         sessionLevel = escalation.level;
         session.event(escalation.reason ? `${REPORT_LEVEL_NAMES[escalation.level]}: ${escalation.reason}` : REPORT_LEVEL_NAMES[escalation.level]);
@@ -1311,6 +1340,7 @@ function stopCamera() {
   stopAlarm();
   playStopSound();
   muteBtn.hidden = true;
+  checkInBtn.hidden = true;
   cameraIcon.style.display = "";
   liveDot.hidden = true;
   resetDashboard();
@@ -1357,6 +1387,17 @@ exportBtn.addEventListener("click", () => {
   session.drawReport(reportCanvas);
   reportCanvas.toBlob((blob) => blob && download(blob, `${stem}.png`), "image/png");
   download(new Blob([session.csv()], { type: "text/csv" }), `${stem}.csv`);
+});
+
+checkInBtn.addEventListener("click", () => {
+  checkInAnswered = true;
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.code === "Space" && !checkInBtn.hidden) {
+    event.preventDefault();
+    checkInAnswered = true;
+  }
 });
 
 muteBtn.addEventListener("click", () => {

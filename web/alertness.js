@@ -72,9 +72,47 @@ class AlertnessMonitor {
   }
 }
 
-const CUE_LABELS = { eyes: "eyes closed", mouth: "yawning", head: "head drooped", body: "slumped" };
+const CUE_LABELS = { eyes: "eyes closed", mouth: "yawning", head: "head drooped", body: "slumped", checkIn: "no check-in answer" };
 
 // Mirrors EscalationMonitor in src/watch/alertness.py.
+class CheckInMonitor {
+  constructor(blindSec, answerSec) {
+    this.blind = blindSec;
+    this.answer = answerSec;
+    this.blindSince = null;
+    this.askedAt = null;
+    this.lastReaction = null;
+    this.justAnswered = false;
+  }
+
+  get asking() {
+    return this.askedAt !== null;
+  }
+
+  update(eyesReadable, personPresent, answered, now) {
+    this.justAnswered = false;
+    if (!personPresent) {
+      this.blindSince = this.askedAt = null;
+      return { state: "no_face", closedDuration: 0, perclos: 0 };
+    }
+    if (eyesReadable) {
+      this.blindSince = this.askedAt = null;
+      return { state: "alert", closedDuration: 0, perclos: 0 };
+    }
+    if (this.blindSince === null) this.blindSince = now;
+    if (this.askedAt !== null && answered) {
+      this.lastReaction = now - this.askedAt;
+      this.justAnswered = true;
+      this.askedAt = null;
+      this.blindSince = now;
+      return { state: "alert", closedDuration: 0, perclos: 0 };
+    }
+    if (this.askedAt === null && now - this.blindSince >= this.blind) this.askedAt = now;
+    const overdue = this.askedAt !== null ? now - this.askedAt - this.answer : -1;
+    return overdue >= 0 ? { state: "not_alert", closedDuration: overdue, perclos: 0 } : { state: "alert", closedDuration: 0, perclos: 0 };
+  }
+}
+
 class EscalationMonitor {
   constructor({ windowSec, calmSec, persistSec, repeatCount }) {
     this.window = windowSec;

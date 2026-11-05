@@ -75,7 +75,41 @@ class AlertnessMonitor:
         return sum(score for _, score in self._history) / len(self._history)
 
 
-CUE_LABELS = {"eyes": "eyes closed", "mouth": "yawning", "head": "head drooped", "body": "slumped"}
+CUE_LABELS = {"eyes": "eyes closed", "mouth": "yawning", "head": "head drooped", "body": "slumped", "check_in": "no check-in answer"}
+
+
+class CheckInMonitor:
+
+    def __init__(self, blind_sec, answer_sec):
+        self.blind = blind_sec
+        self.answer = answer_sec
+        self._blind_since: float | None = None
+        self._asked_at: float | None = None
+        self.last_reaction: float | None = None
+        self.just_answered = False
+
+    @property
+    def asking(self) -> bool:
+        return self._asked_at is not None
+
+    def update(self, eyes_readable: bool, person_present: bool, answered: bool, now: float) -> AlertnessStatus:
+        self.just_answered = False
+        if not person_present:
+            self._blind_since = self._asked_at = None
+            return AlertnessStatus("no_face", 0.0, 0.0)
+        if eyes_readable:
+            self._blind_since = self._asked_at = None
+            return AlertnessStatus("alert", 0.0, 0.0)
+        if self._blind_since is None:
+            self._blind_since = now
+        if self._asked_at is not None and answered:
+            self.last_reaction, self.just_answered = now - self._asked_at, True
+            self._asked_at, self._blind_since = None, now
+            return AlertnessStatus("alert", 0.0, 0.0)
+        if self._asked_at is None and now - self._blind_since >= self.blind:
+            self._asked_at = now
+        overdue = now - self._asked_at - self.answer if self._asked_at is not None else -1.0
+        return AlertnessStatus("not_alert", overdue, 0.0) if overdue >= 0 else AlertnessStatus("alert", 0.0, 0.0)
 
 
 @dataclass
