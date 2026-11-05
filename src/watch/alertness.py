@@ -75,7 +75,7 @@ class AlertnessMonitor:
         return sum(score for _, score in self._history) / len(self._history)
 
 
-CUE_LABELS = {"eyes": "eyes closed", "mouth": "yawning", "head": "head drooped"}
+CUE_LABELS = {"eyes": "eyes closed", "mouth": "yawning", "head": "head drooped", "body": "slumped"}
 
 
 @dataclass

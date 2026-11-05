@@ -222,6 +222,7 @@ const LEVEL_BANNERS = {
   1: { text: "WARNING", color: "#ffd700" },
   2: { text: "CRITICAL", color: "#dc0000" },
   no_face: { text: "NO FACE DETECTED", color: "#787878" },
+  face_covered: { text: "FACE COVERED", color: "#3d7bd6" },
   camera_lost: { text: "CAMERA LOST", color: "#dc0000" },
 };
 
@@ -358,9 +359,9 @@ function makeBodyTracker(poseLandmarker) {
 // Mirrors LiveMonitor._body: shown on the dashboard only, not used for alerts yet.
 function bodyStatus(pose) {
   if (!pose) return null;
-  if (!bodyBase) return { label: "upright", score: 0, drop: null, lean: null };
-  const { score, drop, lean } = bodySlump(pose, bodyBase, CONFIG.body);
-  return { label: score >= 1 ? "slumped" : "upright", score, drop, lean, pose };
+  if (!bodyBase) return { label: "upright", score: 0, drop: null, lean: null, headDrop: null };
+  const { score, drop, lean, headDrop } = bodySlump(pose, bodyBase, CONFIG.body);
+  return { label: score >= 1 ? "slumped" : "upright", score, drop, lean, headDrop, pose };
 }
 
 // Mirrors the body marker in LiveMonitor._draw: the shoulder line, over a dashed line at the calibrated shoulder height.
@@ -575,8 +576,12 @@ function eyeClosednessOf(readings) {
   return total ? eyes.reduce((s, r) => s + r.closedness * r.width, 0) / total : null;
 }
 
-function levelBanner(escalation, faceFound) {
-  return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
+function idleState(faceFound, body) {
+  return !faceFound && body ? "face_covered" : "no_face";
+}
+
+function levelBanner(escalation, faceFound, body) {
+  return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? idleState(faceFound, body) : escalation.level];
 }
 
 const dashLevel = document.getElementById("dashLevel");
@@ -664,7 +669,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, body
   if (performance.now() - dashLastDraw < 150) return;
   dashLastDraw = performance.now();
 
-  const banner = levelBanner(escalation, faceFound);
+  const banner = levelBanner(escalation, faceFound, body);
   const timer = { 1: `watching ${escalation.windowLeft.toFixed(0)}s`, 2: "alarm on" }[escalation.level] || "";
   setDashLevel(banner.text, banner.color, escalation.reason, timer, escalation.level === 1);
 
@@ -709,6 +714,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, body
     ["Head tilt", head ? `${head.roll.toFixed(1)}°` : "-", head && head.roll >= headPoseCfg.rollDroopedThreshold],
     ["Body drop", body?.drop != null ? `${Math.round(body.drop * 100)}%` : "-", body?.drop != null && body.drop >= CONFIG.body.dropLimit],
     ["Body lean", body?.lean != null ? `${body.lean.toFixed(1)}°` : "-", body?.lean != null && body.lean >= CONFIG.body.leanLimitDeg],
+    ["Head drop", body?.headDrop != null ? `${(body.headDrop * 100).toFixed(0)}%` : "-", body?.headDrop != null && body.headDrop >= CONFIG.body.headDropLimit],
   ];
   document.getElementById("dashLive").innerHTML = live
     .map(([label, value, past]) => dashRow("transparent", label, value, "", past ? DOT.red : value === "-" ? "#888" : "#eee"))
@@ -772,7 +778,8 @@ async function calibrate(faceLandmarker, trackBody, durationSec, closedOffset, d
   }
 
   // The sitting posture the body check compares against, if the shoulders were in view.
-  bodyBase = poses.length >= 5 ? Object.fromEntries(["centerX", "centerY", "width", "tilt"].map((k) => [k, median(poses.map((p) => p[k]))])) : null;
+  const heads = poses.map((p) => p.head).filter((v) => v != null);
+  bodyBase = poses.length >= 5 ? { ...Object.fromEntries(["centerX", "centerY", "width", "tilt"].map((k) => [k, median(poses.map((p) => p[k]))])), head: heads.length ? median(heads) : null } : null;
   if (earSamples.length < 10) return null;
   const earBaseline = median(earSamples);
   const result = { ear: { openThreshold: earBaseline, closedThreshold: earBaseline - closedOffset } };
@@ -916,8 +923,8 @@ async function main() {
   if (!cameraActive) return;
   muteBtn.hidden = false;
 
-  let eyeSmoother, leftEyeSmoother, rightEyeSmoother, mouthSmoother, headSmoother;
-  let eyeMonitor, yawnMonitor, nodMonitor, escalationMonitor;
+  let eyeSmoother, leftEyeSmoother, rightEyeSmoother, mouthSmoother, headSmoother, bodySmoother;
+  let eyeMonitor, yawnMonitor, nodMonitor, slumpMonitor, escalationMonitor;
 
   // Mirrors LiveMonitor._reset in src/watch/live.py: a fresh start after every calibration.
   function resetMonitors() {
@@ -926,6 +933,7 @@ async function main() {
     rightEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
     mouthSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
     headSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+    bodySmoother = new RollingMedian(CONFIG.live.smoothingWindow);
 
     eyeMonitor = new AlertnessMonitor({
       closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -947,6 +955,13 @@ async function main() {
       perclosThreshold: CONFIG.nod.perclosThreshold,
       closednessThreshold: CONFIG.nod.closednessThreshold,
       dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
+    });
+    slumpMonitor = new AlertnessMonitor({
+      closedDurationThreshold: CONFIG.slump.closedDurationThresholdSec,
+      perclosWindow: CONFIG.slump.perclosWindowSec,
+      perclosThreshold: CONFIG.slump.perclosThreshold,
+      closednessThreshold: CONFIG.slump.closednessThreshold,
+      dipGracePeriod: CONFIG.slump.dipGracePeriodSec,
     });
   }
   resetMonitors();
@@ -976,8 +991,9 @@ async function main() {
       }
       const faceFound = result.faceLandmarks.length > 0;
       glareBox = faceFound ? faceBox(result.faceLandmarks[0], canvas.width, canvas.height) : null;
+      const bodyResult = bodyStatus(trackBody(glareCleanCanvas));
 
-      if (!faceFound) {
+      if (!faceFound && !bodyResult) {
         if (noFaceSince === null) noFaceSince = performance.now();
       } else if (noFaceSince !== null) {
         // The user left the camera, so calibrate again for whoever is in front of it now.
@@ -1016,7 +1032,6 @@ async function main() {
           headDroop = headResult?.droop ?? null;
         }
       }
-      const bodyResult = bodyStatus(trackBody(glareCleanCanvas));
       drawBody(bodyResult);
       // A frame still in flight when the camera stops must not overwrite the idle dashboard or start the alarm.
       if (!cameraActive) return;
@@ -1024,8 +1039,9 @@ async function main() {
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
+      const slumpStatus = slumpMonitor.update(bodySmoother.add(!faceFound && bodyResult && bodyBase ? bodyResult.score : null), now);
 
-      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, faceFound, now);
+      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus, body: slumpStatus }, faceFound || bodyResult !== null, now);
       if (escalation.level !== sessionLevel) {
         sessionLevel = escalation.level;
         session.event(escalation.reason ? `${REPORT_LEVEL_NAMES[escalation.level]}: ${escalation.reason}` : REPORT_LEVEL_NAMES[escalation.level]);
@@ -1033,7 +1049,7 @@ async function main() {
       const ears = [leftResult, rightResult].filter(Boolean).map((r) => r.ear);
       session.add(
         Date.now() / 1000,
-        !faceFound && escalation.level === 0 ? "No face" : REPORT_LEVEL_NAMES[escalation.level],
+        !faceFound && escalation.level === 0 ? { no_face: "No face", face_covered: "Face covered" }[idleState(faceFound, bodyResult)] : REPORT_LEVEL_NAMES[escalation.level],
         { ear: ears.length ? ears.reduce((a, b) => a + b, 0) / ears.length : null, mar: mouthResult?.mar ?? null, headDown: headResult?.pitch ?? null, headTilt: headResult?.roll ?? null },
         { earClosed: earCfg.closedThreshold, headDown: headPoseCfg.droopedThreshold, headTilt: headPoseCfg.rollDroopedThreshold },
       );

@@ -72,7 +72,7 @@ class AlertnessMonitor {
   }
 }
 
-const CUE_LABELS = { eyes: "eyes closed", mouth: "yawning", head: "head drooped" };
+const CUE_LABELS = { eyes: "eyes closed", mouth: "yawning", head: "head drooped", body: "slumped" };
 
 // Mirrors EscalationMonitor in src/watch/alertness.py.
 class EscalationMonitor {

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import cv2
 import mediapipe as mp
 
-LEFT_SHOULDER, RIGHT_SHOULDER = 11, 12
+NOSE, LEFT_SHOULDER, RIGHT_SHOULDER = 0, 11, 12
 
 
 @dataclass
@@ -17,6 +17,7 @@ class BodyPose:
     tilt: float  # shoulder line angle, degrees, positive when the right shoulder is lower
     left: tuple[float, float] | None = None  # shoulder points in pixels, for drawing
     right: tuple[float, float] | None = None
+    head: float | None = None
 
 
 class BodyTracker:
@@ -47,12 +48,15 @@ def shoulders(landmarks, w: int, h: int, min_visibility: float) -> BodyPose | No
     width = math.hypot(lx - rx, ly - ry)
     if width < 1:
         return None
-    return BodyPose((lx + rx) / 2, (ly + ry) / 2, width, math.degrees(math.atan2(ry - ly, abs(rx - lx))), (lx, ly), (rx, ry))
+    nose = landmarks[NOSE]
+    head = (nose.y * h - (ly + ry) / 2) / width if nose.visibility >= min_visibility else None
+    return BodyPose((lx + rx) / 2, (ly + ry) / 2, width, math.degrees(math.atan2(ry - ly, abs(rx - lx))), (lx, ly), (rx, ry), head)
 
 
-def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[float, float, float]:
-    """(score from 0 upright to 1 slumped, shoulder drop in shoulder widths, extra lean in degrees) against the calibrated posture."""
+def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[float, float, float, float | None]:
+    """(score from 0 upright to 1 slumped, shoulder drop in shoulder widths, extra lean in degrees, head drop toward the shoulders) against the calibrated posture."""
     drop = max(0.0, (pose.center_y - baseline.center_y) / baseline.width)
     lean = abs(pose.tilt - baseline.tilt)
-    score = max(drop / settings["drop_limit"], lean / settings["lean_limit_deg"])
-    return min(1.0, score), drop, lean
+    head_drop = max(0.0, pose.head - baseline.head) if pose.head is not None and baseline.head is not None else None
+    score = max(drop / settings["drop_limit"], lean / settings["lean_limit_deg"], (head_drop or 0.0) / settings["head_drop_limit"])
+    return min(1.0, score), drop, lean, head_drop

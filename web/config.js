@@ -37,6 +37,13 @@ const CONFIG = {
     "closednessThreshold": 1.0,
     "dipGracePeriodSec": 0.0
   },
+  "slump": {
+    "closedDurationThresholdSec": 2.0,
+    "perclosWindowSec": 6.0,
+    "perclosThreshold": 0.9,
+    "closednessThreshold": 1.0,
+    "dipGracePeriodSec": 0.5
+  },
   "ear": {
     "openThreshold": 0.35,
     "closedThreshold": 0.1
@@ -63,19 +70,22 @@ const CONFIG = {
     "persistSec": {
       "eyes": 3.0,
       "mouth": null,
-      "head": 4.0
+      "head": 4.0,
+      "body": 4.0
     },
     "repeatCount": {
       "eyes": 2,
       "mouth": 3,
-      "head": 2
+      "head": 2,
+      "body": 2
     }
   },
   "body": {
     "everyNFrames": 3,
     "minVisibility": 0.5,
     "dropLimit": 0.1,
-    "leanLimitDeg": 10.0
+    "leanLimitDeg": 10.0,
+    "headDropLimit": 0.25
   },
   "live": {
     "minCnnConfidence": 0.65,

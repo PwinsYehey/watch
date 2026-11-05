@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 
 from watch.alertness import AlertnessMonitor, EscalationMonitor, RollingMedian
+from watch.body import BodyPose, BodyTracker
 from watch.config import load_config
 from watch.face import LEFT_EYE_IDS, RIGHT_EYE_IDS, FaceTracker
 from watch.live import LiveMonitor, face_box, glare_fraction, remove_glare
@@ -37,9 +38,12 @@ def monitor_for(config, eye_model, yawn_model):
 def calibrate(m, config, frames, fps):
     calib = config["calibration"]
     n_cal = int(calib["duration_sec"] * fps)
-    ears, pitches, rolls = [], [], []
+    ears, pitches, rolls, poses = [], [], [], []
+    body_tracker = BodyTracker(config["body"])
     with FaceTracker() as tracker:
         for frame in frames[:n_cal]:
+            if pose := body_tracker.update(frame):
+                poses.append(pose)
             regions = tracker.extract(remove_glare(frame))
             if regions:
                 ears += [eye.ratio for eye in regions.eyes.values()]
@@ -57,6 +61,9 @@ def calibrate(m, config, frames, fps):
             "roll_upright_threshold": roll,
             "roll_drooped_threshold": roll + calib["roll_drooped_offset"],
         }
+    body_tracker.close()
+    heads = [p.head for p in poses if p.head is not None]
+    m.body_base = BodyPose(*(statistics.median(getattr(p, f) for p in poses) for f in ("center_x", "center_y", "width", "tilt")), head=statistics.median(heads) if heads else None) if len(poses) >= 5 else None
     return n_cal
 
 
@@ -80,8 +87,9 @@ def run(video, config, eye_model, yawn_model, writer):
 
     m = monitor_for(config, eye_model, yawn_model)
     n_cal = calibrate(m, config, [frame for _, frame in read_frames(video, stop=int(config["calibration"]["duration_sec"] * fps))], fps)
-    m.smoothers = {key: RollingMedian(m.settings["smoothing_window"]) for key in ("left", "right", "eyes", "mouth", "head")}
-    monitors = {key: AlertnessMonitor(**config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"))}
+    m.smoothers = {key: RollingMedian(m.settings["smoothing_window"]) for key in ("left", "right", "eyes", "mouth", "head", "body")}
+    monitors = {key: AlertnessMonitor(**config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"), ("body", "slump"))}
+    body_tracker = BodyTracker(config["body"])
     escalation = EscalationMonitor(**config["escalation"])
     glare_box = None
     with FaceTracker() as tracker:
@@ -89,7 +97,8 @@ def run(video, config, eye_model, yawn_model, writer):
             now = index / fps
             regions = tracker.extract(remove_glare(frame, glare_box))
             glare_box = face_box(regions, frame.shape) if regions else None
-            row = {"video": video.name, "frame": index, "t": round(now, 3), "face": int(regions is not None)}
+            body = m._body(body_tracker.update(frame))
+            row = {"video": video.name, "frame": index, "t": round(now, 3), "face": int(regions is not None), "person": int(regions is not None or body is not None)}
             cues = {}
             if regions:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -118,22 +127,24 @@ def run(video, config, eye_model, yawn_model, writer):
                 "eyes": sum(s * w for s, w in eyes) / weight if weight else None,
                 "mouth": cues["mouth"]["score"] if cues.get("mouth") else None,
                 "head": cues["head"]["score"] if cues.get("head") else None,
+                "body": body["score"] if regions is None and body and m.body_base else None,
             }
             statuses = {key: monitors[key].update(m.smoothers[key].add(score), now) for key, score in scores.items()}
-            level = escalation.update(statuses, regions is not None, now)
+            level = escalation.update(statuses, regions is not None or body is not None, now)
             for key, score in scores.items():
                 row[f"{key}_score"] = score
                 row[f"{key}_state"] = statuses[key].state
             row["level"], row["reason"] = level.level, level.reason
+            row["screen"] = LiveMonitor._idle_state(regions, {"body": body}) if regions is None and level.level == 0 else level.level
             writer.writerow(row)
 
 
-FIELDS = ["video", "frame", "t", "face"]
+FIELDS = ["video", "frame", "t", "face", "person"]
 for side in ("left", "right"):
     FIELDS += [f"{side}_{k}" for k in ("patch_mean", "patch_std", "patch_glare", "region", "cnn_closed", "conf", "ear")]
 FIELDS += ["mouth_cnn_open", "mouth_conf", "mar", "pitch", "roll"]
-FIELDS += [f"{k}_{s}" for k in ("eyes", "mouth", "head") for s in ("score", "state")]
-FIELDS += ["level", "reason"]
+FIELDS += [f"{k}_{s}" for k in ("eyes", "mouth", "head", "body") for s in ("score", "state")]
+FIELDS += ["level", "reason", "screen"]
 
 if __name__ == "__main__":
     out = Path(sys.argv[1])

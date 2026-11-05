@@ -55,3 +55,8 @@ def test_real_yawn_still_counts():
 
 def test_eye_the_model_calls_blocked_is_unreadable():
     assert _monitor()._eye(FRAME, "left", _eye(0.30), ("blocked", 0.9, 0.05)) is None
+
+
+def test_screen_says_face_covered_only_when_a_person_is_still_in_view():
+    assert LiveMonitor._idle_state(None, {"body": {"label": "upright"}}) == "face_covered"
+    assert LiveMonitor._idle_state(None, {"body": None}) == "no_face"

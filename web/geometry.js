@@ -109,7 +109,7 @@ function eyeLineRoll(landmarks, w, h) {
 }
 
 // Mirrors shoulders and body_slump in src/watch/body.py.
-const LEFT_SHOULDER = 11, RIGHT_SHOULDER = 12;
+const NOSE = 0, LEFT_SHOULDER = 11, RIGHT_SHOULDER = 12;
 
 function shouldersFromPose(landmarks, w, h, minVisibility) {
   const left = landmarks[LEFT_SHOULDER], right = landmarks[RIGHT_SHOULDER];
@@ -117,11 +117,14 @@ function shouldersFromPose(landmarks, w, h, minVisibility) {
   const lx = left.x * w, ly = left.y * h, rx = right.x * w, ry = right.y * h;
   const width = Math.hypot(lx - rx, ly - ry);
   if (width < 1) return null;
-  return { centerX: (lx + rx) / 2, centerY: (ly + ry) / 2, width, tilt: (Math.atan2(ry - ly, Math.abs(rx - lx)) * 180) / Math.PI, left: { x: lx, y: ly }, right: { x: rx, y: ry } };
+  const nose = landmarks[NOSE];
+  const head = (nose.visibility ?? 0) >= minVisibility ? (nose.y * h - (ly + ry) / 2) / width : null;
+  return { centerX: (lx + rx) / 2, centerY: (ly + ry) / 2, width, tilt: (Math.atan2(ry - ly, Math.abs(rx - lx)) * 180) / Math.PI, left: { x: lx, y: ly }, right: { x: rx, y: ry }, head };
 }
 
 function bodySlump(pose, baseline, cfg) {
   const drop = Math.max(0, (pose.centerY - baseline.centerY) / baseline.width);
   const lean = Math.abs(pose.tilt - baseline.tilt);
-  return { score: Math.min(1, Math.max(drop / cfg.dropLimit, lean / cfg.leanLimitDeg)), drop, lean };
+  const headDrop = pose.head != null && baseline.head != null ? Math.max(0, pose.head - baseline.head) : null;
+  return { score: Math.min(1, Math.max(drop / cfg.dropLimit, lean / cfg.leanLimitDeg, (headDrop ?? 0) / cfg.headDropLimit)), drop, lean, headDrop };
 }

@@ -109,8 +109,8 @@ class LiveMonitor:
 
     def _reset(self):
         window = self.settings["smoothing_window"]
-        self.smoothers = {key: RollingMedian(window) for key in ("left", "right", "eyes", "mouth", "head")}
-        self.monitors = {key: AlertnessMonitor(**self.config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"))}
+        self.smoothers = {key: RollingMedian(window) for key in ("left", "right", "eyes", "mouth", "head", "body")}
+        self.monitors = {key: AlertnessMonitor(**self.config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"), ("body", "slump"))}
         self.escalation = EscalationMonitor(**self.config["escalation"])
         self._level = 0
 
@@ -197,7 +197,8 @@ class LiveMonitor:
                 "roll_drooped_threshold": roll + settings["roll_drooped_offset"],
             }
         # The sitting posture the body check compares against, if the shoulders were in view.
-        self.body_base = BodyPose(*(statistics.median(getattr(p, f) for p in poses) for f in ("center_x", "center_y", "width", "tilt"))) if len(poses) >= 5 else None
+        heads = [p.head for p in poses if p.head is not None]
+        self.body_base = BodyPose(*(statistics.median(getattr(p, f) for p in poses) for f in ("center_x", "center_y", "width", "tilt")), head=statistics.median(heads) if heads else None) if len(poses) >= 5 else None
         print(f"Thresholds: EAR closed<={self.ear['closed_threshold']:.2f}, pitch drooped>={self.head['drooped_threshold']:.1f}")
         self._reset()
 
@@ -221,14 +222,18 @@ class LiveMonitor:
         openness = max(cnn_open, linear_score(mouth.ratio, mar["closed_threshold"], mar["open_threshold"]))
         return {"score": openness, "label": "yawn" if openness >= 0.5 else "no yawn", "ratio": mouth.ratio}
 
+    @staticmethod
+    def _idle_state(regions, cues):
+        return "face_covered" if regions is None and cues.get("body") else "no_face"
+
     def _body(self, pose):
-        """Shoulder posture against calibration; shown on the dashboard only, not used for alerts yet."""
+        """Shoulder and head posture against calibration; it raises alerts only while the face cannot be read."""
         if pose is None:
             return None
         if self.body_base is None:
-            return {"label": "upright", "score": 0.0, "drop": None, "lean": None, "pose": pose}
-        score, drop, lean = body_slump(pose, self.body_base, self.config["body"])
-        return {"label": "slumped" if score >= 1.0 else "upright", "score": score, "drop": drop, "lean": lean, "pose": pose}
+            return {"label": "upright", "score": 0.0, "drop": None, "lean": None, "head_drop": None, "pose": pose}
+        score, drop, lean, head_drop = body_slump(pose, self.body_base, self.config["body"])
+        return {"label": "slumped" if score >= 1.0 else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "pose": pose}
 
     def _head(self, pitch, roll):
         if pitch is None:
@@ -284,7 +289,7 @@ class LiveMonitor:
 
     def _dashboard(self, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
         """The dashboard contents, mirroring updateDashboard and showCalibration in web/app.js."""
-        name, color = ui.LEVELS["no_face" if regions is None and escalation.level == 0 else escalation.level]
+        name, color = ui.LEVELS[self._idle_state(regions, cues) if regions is None and escalation.level == 0 else escalation.level]
         timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
         level = ui.Level(name, color, escalation.reason, timer)
 
@@ -336,6 +341,7 @@ class LiveMonitor:
             ("Head tilt", f"{head['roll']:.1f}\u00b0" if head else "-", bool(head) and head["roll"] >= self.head["roll_drooped_threshold"]),
             ("Body drop", f"{body['drop'] * 100:.0f}%" if body and body["drop"] is not None else "-", bool(body) and body["drop"] is not None and body["drop"] >= self.config["body"]["drop_limit"]),
             ("Body lean", f"{body['lean']:.1f}\u00b0" if body and body["lean"] is not None else "-", bool(body) and body["lean"] is not None and body["lean"] >= self.config["body"]["lean_limit_deg"]),
+            ("Head drop", f"{body['head_drop'] * 100:.0f}%" if body and body["head_drop"] is not None else "-", bool(body) and body["head_drop"] is not None and body["head_drop"] >= self.config["body"]["head_drop_limit"]),
         ]
         readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
         return level, signs, checks, calibration, readings
@@ -388,7 +394,8 @@ class LiveMonitor:
                 # Only glare on the face matters, so skip bright spots elsewhere such as windows.
                 regions = self.tracker.extract(remove_glare(frame, glare_box))
                 glare_box = face_box(regions, frame.shape) if regions else None
-                if regions is None:
+                body = self._body(self.body_tracker.update(frame))
+                if regions is None and body is None:
                     no_face_since = no_face_since or time.time()
                 elif no_face_since is not None:
                     # The user left the camera, so calibrate again for whoever is in front of it now.
@@ -405,7 +412,7 @@ class LiveMonitor:
                     cues = {side: self._eye(frame, side, eye, prediction) for (side, eye), prediction in zip(regions.eyes.items(), predictions)}
                     cues["mouth"] = self._mouth(regions.mouth) if regions.mouth else None
                     cues["head"] = self._head(regions.pitch, regions.roll)
-                cues["body"] = self._body(self.body_tracker.update(frame))
+                cues["body"] = body
                 # The eye nearer the camera looks wider, so it counts more.
                 eyes = [(cues[side]["score"], regions.eyes[side].width) for side in ("left", "right") if cues.get(side)]
                 eye_weight = sum(width for _, width in eyes)
@@ -413,17 +420,18 @@ class LiveMonitor:
                     "eyes": sum(score * width for score, width in eyes) / eye_weight if eye_weight else None,
                     "mouth": cues["mouth"]["score"] if cues.get("mouth") else None,
                     "head": cues["head"]["score"] if cues.get("head") else None,
+                    "body": body["score"] if regions is None and body and self.body_base else None,
                 }
 
                 now = time.time()
                 statuses = {key: self.monitors[key].update(self.smoothers[key].add(score), now) for key, score in scores.items()}
-                escalation = self.escalation.update(statuses, regions is not None, now)
+                escalation = self.escalation.update(statuses, regions is not None or body is not None, now)
                 self.alarm.set(escalation.level == 2 and not self.muted)
                 if escalation.level != self._level:
                     self._level = escalation.level
                     self.events.append((time.strftime("%H:%M:%S"), escalation.level, escalation.reason))
                     self.session.event(f"{LEVEL_NAMES[escalation.level]}: {escalation.reason}".rstrip(": "))
-                state = "No face" if regions is None and escalation.level == 0 else LEVEL_NAMES[escalation.level]
+                state = {"no_face": "No face", "face_covered": "Face covered"}[self._idle_state(regions, cues)] if regions is None and escalation.level == 0 else LEVEL_NAMES[escalation.level]
                 self.session.add(now, state, self._readings(cues), self._limits())
 
                 sharpness = face_sharpness(brighten(frame, self.settings["low_light_mean"], self.settings["low_light_target"]), regions.landmarks) if regions else None

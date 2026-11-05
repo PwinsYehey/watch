@@ -3,11 +3,11 @@
 const REPORT = {
   surface: "#fcfcfb", grid: "#e1e0d9", axis: "#c3c2b7",
   ink: "#0b0b0b", ink2: "#52514e", muted: "#898781",
-  levels: { Normal: "#0ca30c", Warning: "#fab219", Critical: "#d03b3b", "No face": "#898781", Calibrating: "#c3c2b7", "Camera lost": "#7a1f1f" },
+  levels: { Normal: "#0ca30c", Warning: "#fab219", Critical: "#d03b3b", "No face": "#898781", "Face covered": "#3d7bd6", Calibrating: "#c3c2b7", "Camera lost": "#7a1f1f" },
   font: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
 };
 const REPORT_LEVEL_NAMES = { 0: "Normal", 1: "Warning", 2: "Critical" };
-const REPORT_STATUS = { Normal: "NORMAL", Warning: "WARNING", Critical: "CRITICAL", "No face": "NO FACE DETECTED", Calibrating: "CALIBRATING", "Camera lost": "CAMERA LOST" };
+const REPORT_STATUS = { Normal: "NORMAL", Warning: "WARNING", Critical: "CRITICAL", "No face": "NO FACE DETECTED", "Face covered": "FACE COVERED", Calibrating: "CALIBRATING", "Camera lost": "CAMERA LOST" };
 const REPORT_LEVEL_VALUE = { Normal: 0, Warning: 1, Critical: 2 };
 
 function reportClock(seconds) {
@@ -71,7 +71,7 @@ class SessionLog {
     let warnings = 0, criticals = 0;
     for (let i = 1; i < this.samples.length; i++) {
       const current = this.samples[i - 1], following = this.samples[i];
-      if (following.state === "Warning" && (current.state === "Normal" || current.state === "No face")) warnings++;
+      if (following.state === "Warning" && (current.state === "Normal" || current.state === "No face" || current.state === "Face covered")) warnings++;
       if (following.state === "Critical" && current.state !== "Critical") criticals++;
     }
     const started = new Date(this.samples[0].clock * 1000);
