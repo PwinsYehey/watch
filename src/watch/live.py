@@ -205,6 +205,8 @@ class LiveMonitor:
         _, confidence, cnn_closed = prediction
         if confidence < self.settings["min_cnn_confidence"]:
             return None
+        if cnn_closed >= 0.5 and eye.ratio > (self.ear["open_threshold"] + self.ear["closed_threshold"]) / 2:
+            return None
         ear_closed = eye.ratio <= self.ear["closed_threshold"] and glare_fraction(frame, eye.box) < self.settings["ear_glare_tolerance"]
         closedness = self.smoothers[side].add(max(float(ear_closed), cnn_closed))
         return {"score": closedness, "label": "closed" if closedness >= 0.5 else "open", "ratio": eye.ratio}
@@ -214,6 +216,8 @@ class LiveMonitor:
         if confidence < self.settings["min_cnn_confidence"]:
             return None
         mar = self.config["mar"]
+        if cnn_open >= 0.5 and mouth.ratio < mar["closed_threshold"]:
+            return None
         openness = max(cnn_open, linear_score(mouth.ratio, mar["closed_threshold"], mar["open_threshold"]))
         return {"score": openness, "label": "yawn" if openness >= 0.5 else "no yawn", "ratio": mouth.ratio}
 

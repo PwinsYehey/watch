@@ -1,0 +1,53 @@
+from types import SimpleNamespace
+
+import numpy as np
+
+from watch.alertness import RollingMedian
+from watch.config import load_config
+from watch.live import LiveMonitor
+
+
+class _Model:
+    def __init__(self, positive):
+        self.positive = positive
+
+    def predict(self, crop):
+        return "label", 0.9, self.positive
+
+
+def _monitor(yawn_open=0.0):
+    config = load_config()
+    monitor = object.__new__(LiveMonitor)
+    monitor.config, monitor.settings = config, config["live"]
+    monitor.ear = {"open_threshold": 0.30, "closed_threshold": 0.20}
+    monitor.yawn_model = _Model(yawn_open)
+    monitor.smoothers = {key: RollingMedian(1) for key in ("left", "right")}
+    return monitor
+
+
+FRAME = np.full((100, 100, 3), 120, np.uint8)
+
+
+def _eye(ratio):
+    return SimpleNamespace(ratio=ratio, box=(10, 10, 30, 20))
+
+
+def test_eye_read_closed_by_the_model_but_open_by_shape_is_unreadable():
+    assert _monitor()._eye(FRAME, "left", _eye(0.29), ("eyes_closed", 0.9, 0.9)) is None
+
+
+def test_eye_closed_by_model_and_shape_still_counts_as_closed():
+    cue = _monitor()._eye(FRAME, "left", _eye(0.18), ("eyes_closed", 0.9, 0.9))
+    assert cue["label"] == "closed"
+
+
+def test_open_eye_reads_open():
+    assert _monitor()._eye(FRAME, "left", _eye(0.30), ("eyes_opened", 0.9, 0.1))["label"] == "open"
+
+
+def test_yawn_on_a_closed_mouth_means_the_mouth_is_covered():
+    assert _monitor(yawn_open=0.95)._mouth(SimpleNamespace(crop=None, ratio=0.05)) is None
+
+
+def test_real_yawn_still_counts():
+    assert _monitor(yawn_open=0.95)._mouth(SimpleNamespace(crop=None, ratio=0.7))["label"] == "yawn"

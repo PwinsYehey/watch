@@ -510,6 +510,7 @@ function drawHeadAxis(landmarks, color) {
 function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
   const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  if (cnnClosedness >= 0.5 && ear > (earCfg.openThreshold + earCfg.closedThreshold) / 2) return null;
 
   // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.
   const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < CONFIG.live.earGlareTolerance ? 1.0 : 0.0;
@@ -525,6 +526,7 @@ function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
 function drawMouth(prediction, mar, landmarks) {
   const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = prediction;
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  if (cnnOpenness >= 0.5 && mar < CONFIG.mar.closedThreshold) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
   const openness = Math.max(cnnOpenness, marOpenness);
