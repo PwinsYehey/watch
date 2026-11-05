@@ -69,8 +69,8 @@ const CONFIG = {
   "body": {
     "everyNFrames": 3,
     "minVisibility": 0.5,
-    "dropLimit": 0.5,
-    "leanLimitDeg": 20.0
+    "dropLimit": 0.1,
+    "leanLimitDeg": 10.0
   },
   "live": {
     "minCnnConfidence": 0.65,

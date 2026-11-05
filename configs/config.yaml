@@ -99,8 +99,8 @@ body:
   every_n_frames: 3
   min_visibility: 0.5
   # Slumped once the shoulders drop this many shoulder widths, or the shoulder line tilts this far past calibration.
-  drop_limit: 0.5
-  lean_limit_deg: 20.0
+  drop_limit: 0.10
+  lean_limit_deg: 10.0
 
 # Defaults used until per-user calibration replaces them.
 ear:
