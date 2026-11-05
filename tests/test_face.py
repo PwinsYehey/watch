@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import cv2
 import numpy as np
 
-from watch.face import aligned_crop, aspect_ratio, brighten, crop_box
+from watch.face import aligned_crop, aspect_ratio, brighten, crop_box, eye_line_roll
 
 
 def _landmarks(points: dict[int, tuple[float, float]]):
@@ -51,3 +51,12 @@ def test_brighten_lifts_only_dark_frames():
     dark, normal = np.full((48, 64, 3), 30, np.uint8), np.full((48, 64, 3), 150, np.uint8)
     assert abs(brighten(dark, 0.3, 0.45).mean() / 255 - 0.45) < 0.01
     assert brighten(normal, 0.3, 0.45) is normal
+
+
+def test_eye_line_roll_reads_tilt_and_never_flips():
+    level = _landmarks({33: (0.3, 0.5), 263: (0.7, 0.5)})
+    tilted = _landmarks({33: (0.3, 0.4), 263: (0.7, 0.6)})
+    assert np.isclose(eye_line_roll(level, 100, 100), 0.0)
+    assert np.isclose(eye_line_roll(tilted, 100, 100), np.degrees(np.arctan2(20, 40)))
+    turned = _landmarks({33: (0.48, 0.5), 263: (0.52, 0.51)})
+    assert eye_line_roll(turned, 100, 100) < 90
