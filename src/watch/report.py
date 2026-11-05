@@ -14,6 +14,7 @@ LEVEL_STYLE = {
     "Warning": "#fab219",
     "Critical": "#d03b3b",
     "No face": MUTED,
+    "Face covered": "#3d7bd6",
     "Calibrating": AXIS,
     "Camera lost": "#7a1f1f",
 }
@@ -23,6 +24,7 @@ STATUS_TEXT = {
     "Warning": "WARNING",
     "Critical": "CRITICAL",
     "No face": "NO FACE DETECTED",
+    "Face covered": "FACE COVERED",
     "Calibrating": "CALIBRATING",
     "Camera lost": "CAMERA LOST",
 }
@@ -122,7 +124,7 @@ class SessionLog:
         duration = self.samples[-1].elapsed
         warnings = criticals = 0
         for current, following in zip(self.samples, self.samples[1:]):
-            warnings += following.state == "Warning" and current.state in ("Normal", "No face")
+            warnings += following.state == "Warning" and current.state in ("Normal", "No face", "Face covered")
             criticals += following.state == "Critical" and current.state != "Critical"
         return (
             f"Started {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.samples[0].clock))}  ·  duration {_clock(duration)}"

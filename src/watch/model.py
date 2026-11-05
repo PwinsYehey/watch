@@ -66,6 +66,8 @@ class Classifier:
         self.model = load_model(name)
         self.class_names = spec["class_names"]
         self.positive_index = self.class_names.index(spec["positive_class"])
+        self.unreadable_index = self.class_names.index(spec["unreadable_class"]) if "unreadable_class" in spec else None
+        self.unreadable_threshold = spec.get("unreadable_threshold", 0.5)
         self.grayscale = spec["grayscale"]
         self.image_size = tuple(config["image_size"])
         # Compiled once, which avoids most of the per-call overhead of running the Keras model eagerly.
@@ -88,6 +90,14 @@ class Classifier:
         probabilities = self._infer(np.stack([self._prepare(crop) for crop in crops_bgr])).numpy()
         results = []
         for row in probabilities:
+            if self.unreadable_index is not None:
+                unreadable = float(row[self.unreadable_index])
+                row = row.copy()
+                row[self.unreadable_index] = 0.0
+                row = row / max(float(row.sum()), 1e-9)
+                if unreadable >= self.unreadable_threshold:
+                    results.append((self.class_names[self.unreadable_index], unreadable, float(row[self.positive_index])))
+                    continue
             index = int(np.argmax(row))
             results.append((self.class_names[index], float(row[index]), float(row[self.positive_index])))
         return results

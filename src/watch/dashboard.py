@@ -16,14 +16,16 @@ LEVELS = {
     1: ("WARNING", YELLOW),
     2: ("CRITICAL", RED),
     "no_face": ("NO FACE DETECTED", GRAY),
+    "face_covered": ("FACE COVERED", (61, 123, 214)),
     "calibrating": ("CALIBRATING", (255, 165, 0)),
     "camera_lost": ("CAMERA LOST", RED),
 }
 
 MARGIN, GAP, PAD, HEADER = 16, 16, 12, 52
 VIDEO_W, VIDEO_H, CONTROLS_H = 640, 480, 34
-DASH_W, DASH_PAD, COLUMN_GAP, ROW = 560, 16, 24, 22
-DASH_ROWS = 15
+DASH_W, DASH_PAD, COLUMN_GAP, ROW = 560, 16, 24, 20
+# Rows in the left dashboard column: 4 signs, 8 detection checks and 6 calibration values.
+DASH_ROWS = 18
 CREDITS = ("Property of Prince Herrera, Ormin Cariaso,", "John Casili, Christenzien Lalimo")
 
 _FONT_FILES = {
@@ -67,6 +69,7 @@ class DashboardView:
             "key": _font("bold", 12),
         }
         self._text_cache = {}
+        # The cards are as tall as the taller of the video stack and the dashboard's left column.
         card_height = max(PAD * 2 + VIDEO_H + 10 + CONTROLS_H, 14 + 96 + 3 * 42 + DASH_ROWS * ROW + 14)
         self.size = (MARGIN * 2 + PAD * 2 + VIDEO_W + GAP + DASH_W, HEADER + MARGIN * 2 + card_height)
         self._card_top, self._card_bottom = HEADER + MARGIN, self.size[1] - MARGIN
