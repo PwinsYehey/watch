@@ -27,6 +27,12 @@ PAGE = """<!doctype html>
   button { margin: 0 4px; padding: 8px 14px; border: 1px solid #272c36; border-radius: 8px; background: #1d212a; color: inherit; font: inherit; cursor: pointer; }
   button.on { border-color: #00c800; color: #00c800; }
   #shutdown { border-color: #dc0000; color: #ff4d4d; }
+  details { max-width: 760px; margin: 0 auto 24px; padding: 0 16px; text-align: left; line-height: 1.6; }
+  summary { cursor: pointer; padding: 10px 0; font-weight: 600; color: #9fb4ff; }
+  details h3 { margin: 18px 0 4px; font-size: 14px; }
+  details ul, details ol { margin: 4px 0; padding-left: 20px; }
+  details code { color: #9fb4ff; }
+  details .note { color: #a7adb8; }
 </style>
 </head>
 <body>
@@ -39,6 +45,51 @@ PAGE = """<!doctype html>
   <button id="shutdown" hidden>Shut down device</button>
 </nav>
 <p id="message"></p>
+<details>
+  <summary>How to use WATCH</summary>
+
+  <h3>Starting</h3>
+  <ol>
+    <li>Plug in the Pi. The monitor starts by itself and this page loads after 1 to 2 minutes.</li>
+    <li>Open this page from a device on the same network, or over a cable straight to the Pi.</li>
+    <li>For the first 5 seconds, while it says <b>CALIBRATING</b>, look at the camera normally with your eyes open and <b>without sunglasses</b>. It learns your face from this.</li>
+    <li>Then put on sunglasses or a visor if you need them.</li>
+  </ol>
+  <p class="note">If it starts while your eyes are hidden, it keeps safe default settings instead of learning wrong ones. Step out of view for 3 seconds and come back to calibrate again.</p>
+
+  <h3>Alert levels</h3>
+  <ul>
+    <li><b>NORMAL</b>: eyes, mouth and head look alert.</li>
+    <li><b>WARNING</b>: one sign showed up, such as eyes closed, a yawn or the head dropping. It watches for a while.</li>
+    <li><b>CRITICAL</b>: the sign lasted or came back. The buzzer beeps until it clears.</li>
+    <li><b>NO FACE DETECTED</b>: nobody is in view. <b>CAMERA LOST</b>: the camera stopped, and the buzzer sounds after 3 seconds.</li>
+  </ul>
+
+  <h3>Buttons</h3>
+  <ul>
+    <li><b>Enable alarm sound</b>: also beeps on this device. Browsers need one click before they can play sound.</li>
+    <li><b>Mute / unmute alarm (M)</b>: silences the buzzer and this page.</li>
+    <li><b>Export report (E)</b>: saves a report of the session on the Pi.</li>
+    <li><b>Stop monitor (Q)</b>: restarts the monitor, which starts again by itself.</li>
+    <li><b>Shut down device</b>: always use this before unplugging. Pulling the power while it runs can damage the SD card.</li>
+  </ul>
+
+  <h3>Best results</h3>
+  <ul>
+    <li>Use a lit room. In a fully dark room one IR light is not enough to see through tinted lenses.</li>
+    <li>Keep the whole face in view, chin included, at about arm's length.</li>
+    <li>Put the IR light beside the camera, aimed at the face, and cover its small light sensor with black tape so it stays on instead of flickering.</li>
+    <li>Keep the Pi on a hard surface, not on cloth, so it does not overheat.</li>
+  </ul>
+
+  <h3>What's new</h3>
+  <ul>
+    <li><b>Buzzer</b> on the Pi. It beeps at CRITICAL and goes quiet when the monitor stops. Wiring on the top pin row, counted from the corner hole: VCC on the 1st pin, I/O on the 4th, GND on the 5th.</li>
+    <li><b>Sunglasses</b>: the camera is brighter and a contrast filter lifts the eye area, so eyes show through tinted lenses under IR.</li>
+    <li><b>Sunglasses mode</b> (<code>eye_decision: cnn</code>): the eye model decides open or closed, since behind lenses the eye outline is a guess.</li>
+    <li><b>Training on your own recordings</b> with <code>watch record</code> and <code>watch finetune</code>, run on the Pi over SSH. The buzzer cues each part: one beep open, two beeps closed, a long beep done. See <code>docs/raspberry-pi.md</code>.</li>
+  </ul>
+</details>
 <script>
   const send = (key) => fetch("/key/" + key, { method: "POST" });
   document.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => send(button.dataset.key)));

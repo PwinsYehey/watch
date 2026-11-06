@@ -40,6 +40,7 @@ def test_page_and_state(served):
     port, _ = served()
     status, body = _request(port, "/")
     assert status == 200 and b"/stream" in body
+    assert b"How to use WATCH" in body
     assert json.loads(_request(port, "/state")[1]) == {"alarm": True, "shutdown": False}
 
 
