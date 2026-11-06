@@ -11,7 +11,8 @@ import time
 import cv2
 
 NO_KEY = 0xFF
-KEYS = "qme"
+# Page key to monitor key; "a" answers a check-in, which the desktop window takes as the space bar.
+KEYS = {"q": "q", "m": "m", "e": "e", "a": " "}
 SHUTDOWN_COMMAND = ("systemctl", "poweroff")
 
 PAGE = """<!doctype html>
@@ -33,6 +34,7 @@ PAGE = """<!doctype html>
 <img src="/stream" alt="Live monitor">
 <nav>
   <button id="sound">Enable alarm sound</button>
+  <button data-key="a">I'm awake (Space)</button>
   <button data-key="m">Mute / unmute alarm (M)</button>
   <button data-key="e">Export report (E)</button>
   <button data-key="q">Stop monitor (Q)</button>
@@ -42,7 +44,13 @@ PAGE = """<!doctype html>
 <script>
   const send = (key) => fetch("/key/" + key, { method: "POST" });
   document.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => send(button.dataset.key)));
-  document.addEventListener("keydown", (event) => { if ("qme".includes(event.key.toLowerCase())) send(event.key.toLowerCase()); });
+  document.addEventListener("keydown", (event) => {
+    const key = event.key === " " ? "a" : event.key.toLowerCase();
+    if ("qmea".includes(key)) {
+      event.preventDefault();
+      send(key);
+    }
+  });
 
   // Browsers only play sound after a click, so the alarm has to be switched on once.
   let audio = null;
@@ -180,8 +188,8 @@ class BrowserStream:
 
             def do_POST(self):
                 key = self.path.removeprefix("/key/")
-                if self.path.startswith("/key/") and len(key) == 1 and key in KEYS:
-                    stream._keys.put(key)
+                if self.path.startswith("/key/") and key in KEYS:
+                    stream._keys.put(KEYS[key])
                     self._send(204)
                 elif self.path == "/shutdown" and stream._allow_shutdown:
                     result = subprocess.run(SHUTDOWN_COMMAND, capture_output=True, text=True)

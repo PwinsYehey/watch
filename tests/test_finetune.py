@@ -1,10 +1,14 @@
+from types import SimpleNamespace
+
 import cv2
 import numpy as np
 import pytest
 
+from watch.alertness import RollingMedian
+from watch.config import load_config
 from watch.data.manifest import build_own_eye
 from watch.finetune import split_takes
-from watch.live import ear_thresholds, eye_closedness
+from watch.live import LiveMonitor, ear_thresholds, eye_closedness
 from watch.record import clean_name, crop_path
 
 CALIBRATION = {"closed_offset": 0.10, "min_open_ear": 0.20}
@@ -56,15 +60,30 @@ def test_split_needs_two_takes(tmp_path):
         split_takes(build_own_eye(tmp_path), test_fraction=0.25, seed=42)
 
 
-def test_shape_gate_lets_an_open_shape_overrule_the_cnn():
-    assert eye_closedness(shape_closed=False, glare=False, cnn_closed=0.9) == 0.0
+def test_shape_gate_lets_either_the_shape_or_the_cnn_close_the_eye():
     assert eye_closedness(shape_closed=True, glare=False, cnn_closed=0.2) == 1.0
-    assert eye_closedness(shape_closed=False, glare=True, cnn_closed=0.7) == 0.7
+    assert eye_closedness(shape_closed=False, glare=False, cnn_closed=0.3) == 0.3
+    assert eye_closedness(shape_closed=True, glare=True, cnn_closed=0.2) == 0.2
 
 
 def test_cnn_mode_trusts_the_cnn_alone():
     assert eye_closedness(shape_closed=False, glare=False, cnn_closed=0.9, mode="cnn") == 0.9
     assert eye_closedness(shape_closed=True, glare=False, cnn_closed=0.1, mode="cnn") == 0.1
+
+
+def _monitor(mode):
+    config = load_config()
+    monitor = object.__new__(LiveMonitor)
+    monitor.config, monitor.settings = config, {**config["live"], "eye_decision": mode}
+    monitor.ear = {"open_threshold": 0.30, "closed_threshold": 0.20}
+    monitor.smoothers = {"left": RollingMedian(1)}
+    return monitor
+
+
+def test_cnn_mode_still_reads_a_closed_eye_whose_shape_looks_open():
+    eye, frame = SimpleNamespace(ratio=0.29, box=(10, 10, 30, 20)), np.full((100, 100, 3), 120, np.uint8)
+    assert _monitor("shape_gate")._eye(frame, "left", eye, ("eyes_closed", 0.9, 0.9)) is None
+    assert _monitor("cnn")._eye(frame, "left", eye, ("eyes_closed", 0.9, 0.9))["label"] == "closed"
 
 
 def test_calibration_uses_open_eyes():

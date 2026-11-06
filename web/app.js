@@ -1,5 +1,5 @@
 // Browser port of src/watch/live.py using MediaPipe Tasks Vision and TensorFlow.js.
-import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { FaceLandmarker, FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 480;
@@ -201,6 +201,8 @@ const cameraIcon = document.getElementById("cameraIcon");
 const liveDot = document.getElementById("liveDot");
 const uploadBtn = document.getElementById("uploadBtn");
 const muteBtn = document.getElementById("muteBtn");
+const checkInBtn = document.getElementById("checkInBtn");
+let checkInAnswered = false;
 const exportBtn = document.getElementById("exportBtn");
 let session = new SessionLog();
 let sessionLevel = 0;
@@ -213,6 +215,7 @@ const OPEN_COLOR = "#00c800";
 const CLOSED_COLOR = "#dc0000";
 const MOUTH_COLOR = "#ffc800";
 const HEAD_COLOR = "#ff00c8";
+const BODY_COLOR = "#ff8c00";
 const BANNER_COLORS = { alert: "#00c800", not_alert: "#dc0000", no_face: "#ffa500" };
 const BANNER_TEXT = { alert: "ALERT", not_alert: "NOT ALERT", no_face: "NO FACE DETECTED" };
 // Mirrors BANNERS in src/watch/live.py.
@@ -221,6 +224,7 @@ const LEVEL_BANNERS = {
   1: { text: "WARNING", color: "#ffd700" },
   2: { text: "CRITICAL", color: "#dc0000" },
   no_face: { text: "NO FACE DETECTED", color: "#787878" },
+  face_covered: { text: "FACE COVERED", color: "#3d7bd6" },
   camera_lost: { text: "CAMERA LOST", color: "#dc0000" },
 };
 
@@ -258,6 +262,18 @@ function startAlarm() {
     on = !on;
     alarmGain.gain.value = on ? 1.0 : 0.0;
   }, 250);
+}
+
+function checkInBeep() {
+  if (muted) return;
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const tone = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  tone.frequency.value = 660;
+  gain.gain.value = 0.6;
+  tone.connect(gain).connect(audioCtx.destination);
+  tone.start();
+  tone.stop(audioCtx.currentTime + 0.4);
 }
 
 function stopAlarm() {
@@ -299,7 +315,7 @@ function cropInput(sourceCanvas, crop, desaturate) {
 }
 
 // Mirrors Classifier.predict in src/watch/model.py, running all of one model's crops as a single batch.
-async function predictCrops(model, sourceCanvas, crops, classNames, positiveClass, desaturate = false) {
+async function predictCrops(model, sourceCanvas, crops, classNames, positiveClass, desaturate = false, unreadable = null) {
   const present = crops.filter(Boolean);
   if (!present.length) return crops.map(() => null);
   const output = tf.tidy(() => model.predict(tf.stack(present.map((crop) => cropInput(sourceCanvas, crop, desaturate)))));
@@ -309,7 +325,17 @@ async function predictCrops(model, sourceCanvas, crops, classNames, positiveClas
   let row = 0;
   return crops.map((crop) => {
     if (!crop) return null;
-    const prediction = Array.from(values.slice(row * size, ++row * size));
+    let prediction = Array.from(values.slice(row * size, ++row * size));
+    if (unreadable) {
+      const index = classNames.indexOf(unreadable.className);
+      const unreadableProbability = prediction[index];
+      prediction[index] = 0;
+      const total = prediction.reduce((a, b) => a + b, 0) || 1e-9;
+      prediction = prediction.map((p) => p / total);
+      if (unreadableProbability >= unreadable.threshold) {
+        return { label: unreadable.className, confidence: unreadableProbability, positiveProbability: prediction[classNames.indexOf(positiveClass)] };
+      }
+    }
     const predictedIndex = prediction.indexOf(Math.max(...prediction));
     return {
       label: classNames[predictedIndex],
@@ -321,7 +347,7 @@ async function predictCrops(model, sourceCanvas, crops, classNames, positiveClas
 
 async function predictRegions(regions, eyeModel, yawnModel) {
   const [[left, right], [mouth]] = await Promise.all([
-    predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true),
+    predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true, CONFIG.eyeUnreadable),
     predictCrops(yawnModel, glareCleanCanvas, [regions.mouth?.crop], CONFIG.yawnClassNames, "yawn"),
   ]);
   return { left, right, mouth };
@@ -329,6 +355,56 @@ async function predictRegions(regions, eyeModel, yawnModel) {
 
 let earCfg = CONFIG.ear;
 let headPoseCfg = CONFIG.headPose;
+let bodyBase = null;
+
+// Mirrors BodyTracker in src/watch/body.py: posture changes slowly, so the pose model runs every few frames.
+function makeBodyTracker(poseLandmarker) {
+  let frame = 0, last = null;
+  return (source) => {
+    frame += 1;
+    if (CONFIG.body.everyNFrames === 1 || frame % CONFIG.body.everyNFrames === 1) {
+      const result = poseLandmarker.detectForVideo(source, performance.now());
+      last = result.landmarks.length ? shouldersFromPose(result.landmarks[0], source.width, source.height, CONFIG.body.minVisibility) : null;
+    }
+    return last;
+  };
+}
+
+// Mirrors LiveMonitor._body: shown on the dashboard only, not used for alerts yet.
+function bodyStatus(pose) {
+  if (!pose) return null;
+  if (!bodyBase) return { label: "upright", score: 0, drop: null, lean: null, headDrop: null };
+  const { score, drop, lean, headDrop } = bodySlump(pose, bodyBase, CONFIG.body);
+  return { label: score >= 1 ? "slumped" : "upright", score, drop, lean, headDrop, pose };
+}
+
+// Mirrors the body marker in LiveMonitor._draw: the shoulder line, over a dashed line at the calibrated shoulder height.
+function drawBody(body) {
+  if (!body?.pose) return;
+  const { pose } = body;
+  if (bodyBase) {
+    ctx.strokeStyle = "rgba(150, 150, 150, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(pose.centerX - pose.width / 2, bodyBase.centerY);
+    ctx.lineTo(pose.centerX + pose.width / 2, bodyBase.centerY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const color = body.label === "slumped" ? CLOSED_COLOR : BODY_COLOR;
+  ctx.strokeStyle = ctx.fillStyle = color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(pose.left.x, pose.left.y);
+  ctx.lineTo(pose.right.x, pose.right.y);
+  ctx.stroke();
+  for (const p of [pose.left, pose.right]) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
 
 let modelsPromise = null;
 function ensureModels() {
@@ -364,7 +440,22 @@ function ensureModels() {
         minTrackingConfidence: CONFIG.live.faceTrackingConfidence,
       });
 
-      return { eyeModel, yawnModel, faceLandmarker, vision, baseOptions };
+      const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numPoses: 1,
+      });
+
+      // The first run of each tracker sets up its GPU shaders and can take seconds, so do it now rather than during calibration.
+      const warmUp = document.createElement("canvas");
+      warmUp.width = warmUp.height = 64;
+      faceLandmarker.detectForVideo(warmUp, performance.now());
+      poseLandmarker.detectForVideo(warmUp, performance.now());
+
+      return { eyeModel, yawnModel, faceLandmarker, poseLandmarker, vision, baseOptions };
     })();
   }
   return modelsPromise;
@@ -442,8 +533,9 @@ function drawHeadAxis(landmarks, color) {
 }
 
 function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
-  const { confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
-  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  const { label: cnnLabel, confidence: cnnConfidence, positiveProbability: cnnClosedness } = prediction;
+  if (cnnLabel === "blocked" || cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  if (cnnClosedness >= 0.5 && ear > (earCfg.openThreshold + earCfg.closedThreshold) / 2) return null;
 
   // Glare corrupts EAR geometry, so ignore EAR on heavily glared eyes.
   const earClosedness = ear <= earCfg.closedThreshold && glareFraction(box) < CONFIG.live.earGlareTolerance ? 1.0 : 0.0;
@@ -459,6 +551,7 @@ function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
 function drawMouth(prediction, mar, landmarks) {
   const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = prediction;
   if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  if (cnnOpenness >= 0.5 && mar < CONFIG.mar.closedThreshold) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
   const openness = Math.max(cnnOpenness, marOpenness);
@@ -497,8 +590,12 @@ function eyeClosednessOf(readings) {
   return total ? eyes.reduce((s, r) => s + r.closedness * r.width, 0) / total : null;
 }
 
-function levelBanner(escalation, faceFound) {
-  return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? "no_face" : escalation.level];
+function idleState(faceFound, body) {
+  return !faceFound && body ? "face_covered" : "no_face";
+}
+
+function levelBanner(escalation, faceFound, body) {
+  return LEVEL_BANNERS[!faceFound && escalation.level === 0 ? idleState(faceFound, body) : escalation.level];
 }
 
 const dashLevel = document.getElementById("dashLevel");
@@ -541,6 +638,7 @@ function showCalibration(calibrated) {
     ["Closed eye", `EAR ≤ ${earCfg.closedThreshold.toFixed(2)}`],
     ["Head down", `≥ ${headPoseCfg.droopedThreshold.toFixed(1)}°`],
     ["Head tilt", `≥ ${headPoseCfg.rollDroopedThreshold.toFixed(1)}°`],
+    ["Body", bodyBase ? "measured" : "not seen"],
   ];
   document.getElementById("dashCalibration").innerHTML = rows
     .map(([label, value, color]) => (color ? dashRow(color, label, value) : dashRow("transparent", label, value, "", "#eee")))
@@ -576,7 +674,7 @@ function resetDashboard() {
 }
 
 // Mirrors LiveMonitor._dashboard in src/watch/live.py.
-function updateDashboard({ escalation, faceFound, left, right, mouth, head, statuses, fps, brightness, sharpness }) {
+function updateDashboard({ escalation, faceFound, left, right, mouth, head, body, statuses, fps, brightness, sharpness }) {
   if (escalation.level !== dashLastLevel) {
     dashLastLevel = escalation.level;
     dashEvents.unshift({ time: new Date().toLocaleTimeString([], { hour12: false }), level: escalation.level, reason: escalation.reason });
@@ -585,7 +683,7 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
   if (performance.now() - dashLastDraw < 150) return;
   dashLastDraw = performance.now();
 
-  const banner = levelBanner(escalation, faceFound);
+  const banner = levelBanner(escalation, faceFound, body);
   const timer = { 1: `watching ${escalation.windowLeft.toFixed(0)}s`, 2: "alarm on" }[escalation.level] || "";
   setDashLevel(banner.text, banner.color, escalation.reason, timer, escalation.level === 1);
 
@@ -601,11 +699,13 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
       const color = !state ? DOT.gray : status.state === "not_alert" ? DOT.red : state === concerning ? DOT.yellow : DOT.green;
       return dashRow(color, label, state || "not visible", `${status.closedDuration.toFixed(1)}s`);
     })
-    .join("");
+    .join("")
+    + dashRow(!body ? DOT.gray : body.label === "slumped" ? DOT.yellow : DOT.green, "Body", body ? body.label : "not visible");
 
   const dark = brightness < CONFIG.live.lowLightMean;
   const checks = [
     ["Face", faceFound ? "found" : "not found", faceFound ? DOT.green : DOT.red],
+    ["Person", body ? "in view" : "shoulders not seen", body ? DOT.green : DOT.yellow],
     ["Eyes", faceFound ? `${eyes.length} of 2 readable` : "-", faceFound ? [DOT.red, DOT.yellow, DOT.green][eyes.length] : DOT.gray],
     ["Mouth", faceFound ? (mouth ? "readable" : "not readable") : "-", faceFound ? (mouth ? DOT.green : DOT.yellow) : DOT.gray],
     ["Lighting", dark ? "low, boosted" : "good", dark ? DOT.yellow : DOT.green],
@@ -626,6 +726,9 @@ function updateDashboard({ escalation, faceFound, left, right, mouth, head, stat
     ["Mouth (MAR)", mouth ? mouth.mar.toFixed(2) : "-", mouth?.label === "yawn"],
     ["Head down", head ? `${head.pitch.toFixed(1)}°` : "-", head && head.pitch >= headPoseCfg.droopedThreshold],
     ["Head tilt", head ? `${head.roll.toFixed(1)}°` : "-", head && head.roll >= headPoseCfg.rollDroopedThreshold],
+    ["Body drop", body?.drop != null ? `${Math.round(body.drop * 100)}%` : "-", body?.drop != null && body.drop >= CONFIG.body.dropLimit],
+    ["Body lean", body?.lean != null ? `${body.lean.toFixed(1)}°` : "-", body?.lean != null && body.lean >= CONFIG.body.leanLimitDeg],
+    ["Head drop", body?.headDrop != null ? `${(body.headDrop * 100).toFixed(0)}%` : "-", body?.headDrop != null && body.headDrop >= CONFIG.body.headDropLimit],
   ];
   document.getElementById("dashLive").innerHTML = live
     .map(([label, value, past]) => dashRow("transparent", label, value, "", past ? DOT.red : value === "-" ? "#888" : "#eee"))
@@ -655,27 +758,32 @@ function drawStatusPanel(left, right, mouth, head, targetCtx = ctx) {
   });
 }
 
-async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffset, rollDroopedOffset) {
+async function calibrate(faceLandmarker, trackBody, durationSec, closedOffset, droopedOffset, rollDroopedOffset) {
+  const poses = [];
   const earSamples = [];
   const pitchSamples = [];
   const rollSamples = [];
-  const start = performance.now();
-  while (performance.now() - start < durationSec * 1000) {
+  // The countdown starts after the first processed frame, so a slow start cannot eat into calibration.
+  let start = null;
+  while (start === null || performance.now() - start < durationSec * 1000) {
     updateMirror();
     removeGlare(mirrorCanvas, glareCleanCtx);
     const result = faceLandmarker.detectForVideo(glareCleanCanvas, performance.now());
     session.add(Date.now() / 1000, "Calibrating");
+    const pose = trackBody(glareCleanCanvas);
+    if (pose) poses.push(pose);
     ctx.drawImage(mirrorCanvas, 0, 0, canvas.width, canvas.height);
     if (result.faceLandmarks.length) {
       const lm = result.faceLandmarks[0];
       earSamples.push(eyeAspectRatio(lm, canvas.width, canvas.height, LEFT_EYE_EAR_POINTS));
       earSamples.push(eyeAspectRatio(lm, canvas.width, canvas.height, RIGHT_EYE_EAR_POINTS));
       if (result.facialTransformationMatrixes.length) {
-        const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+        const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data, lm, canvas.width, canvas.height);
         pitchSamples.push(headPose.pitch);
         rollSamples.push(headPose.roll);
       }
     }
+    if (start === null) start = performance.now();
     // The countdown lives in the dashboard, matching the live monitor.
     const remaining = Math.max(0, durationSec - (performance.now() - start) / 1000);
     setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${remaining.toFixed(1)}s left`, false);
@@ -683,6 +791,9 @@ async function calibrate(faceLandmarker, durationSec, closedOffset, droopedOffse
     await new Promise((r) => requestAnimationFrame(r));
   }
 
+  // The sitting posture the body check compares against, if the shoulders were in view.
+  const heads = poses.map((p) => p.head).filter((v) => v != null);
+  bodyBase = poses.length >= 5 ? { ...Object.fromEntries(["centerX", "centerY", "width", "tilt"].map((k) => [k, median(poses.map((p) => p[k]))])), head: heads.length ? median(heads) : null } : null;
   if (earSamples.length < 10) return null;
   const earBaseline = median(earSamples);
   const result = { ear: { openThreshold: earBaseline, closedThreshold: earBaseline - closedOffset } };
@@ -704,7 +815,8 @@ async function main() {
   originalPanel.hidden = true;
   scannedLabel.hidden = true;
   statusEl.textContent = "Loading models...";
-  const { eyeModel, yawnModel, faceLandmarker, vision, baseOptions } = await ensureModels();
+  const { eyeModel, yawnModel, faceLandmarker, poseLandmarker, vision, baseOptions } = await ensureModels();
+  const trackBody = makeBodyTracker(poseLandmarker);
   const zoomLandmarker = await ensureUploadFaceLandmarker(vision, baseOptions);
   await warmUpDetectors(faceLandmarker, zoomLandmarker);
 
@@ -808,7 +920,7 @@ async function main() {
     stopAlarm();
     setDashLevel("CALIBRATING", "#ffa500", "look at the camera normally", `${CONFIG.calibration.durationSec.toFixed(1)}s left`, false);
     const calibrated = await calibrate(
-      faceLandmarker, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
+      faceLandmarker, trackBody, CONFIG.calibration.durationSec, CONFIG.calibration.closedOffset,
       CONFIG.calibration.droopedOffset, CONFIG.calibration.rollDroopedOffset,
     );
     if (calibrated) {
@@ -825,8 +937,8 @@ async function main() {
   if (!cameraActive) return;
   muteBtn.hidden = false;
 
-  let eyeSmoother, leftEyeSmoother, rightEyeSmoother, mouthSmoother, headSmoother;
-  let eyeMonitor, yawnMonitor, nodMonitor, escalationMonitor;
+  let eyeSmoother, leftEyeSmoother, rightEyeSmoother, mouthSmoother, headSmoother, bodySmoother;
+  let eyeMonitor, yawnMonitor, nodMonitor, slumpMonitor, checkInMonitor, escalationMonitor;
 
   // Mirrors LiveMonitor._reset in src/watch/live.py: a fresh start after every calibration.
   function resetMonitors() {
@@ -835,6 +947,7 @@ async function main() {
     rightEyeSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
     mouthSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
     headSmoother = new RollingMedian(CONFIG.live.smoothingWindow);
+    bodySmoother = new RollingMedian(CONFIG.live.smoothingWindow);
 
     eyeMonitor = new AlertnessMonitor({
       closedDurationThreshold: CONFIG.alertness.closedDurationThresholdSec,
@@ -856,6 +969,14 @@ async function main() {
       perclosThreshold: CONFIG.nod.perclosThreshold,
       closednessThreshold: CONFIG.nod.closednessThreshold,
       dipGracePeriod: CONFIG.nod.dipGracePeriodSec,
+    });
+    checkInMonitor = new CheckInMonitor(CONFIG.checkIn.blindSec, CONFIG.checkIn.answerSec);
+    slumpMonitor = new AlertnessMonitor({
+      closedDurationThreshold: CONFIG.slump.closedDurationThresholdSec,
+      perclosWindow: CONFIG.slump.perclosWindowSec,
+      perclosThreshold: CONFIG.slump.perclosThreshold,
+      closednessThreshold: CONFIG.slump.closednessThreshold,
+      dipGracePeriod: CONFIG.slump.dipGracePeriodSec,
     });
   }
   resetMonitors();
@@ -885,8 +1006,9 @@ async function main() {
       }
       const faceFound = result.faceLandmarks.length > 0;
       glareBox = faceFound ? faceBox(result.faceLandmarks[0], canvas.width, canvas.height) : null;
+      const bodyResult = bodyStatus(trackBody(glareCleanCanvas));
 
-      if (!faceFound) {
+      if (!faceFound && !bodyResult) {
         if (noFaceSince === null) noFaceSince = performance.now();
       } else if (noFaceSince !== null) {
         // The user left the camera, so calibrate again for whoever is in front of it now.
@@ -920,19 +1042,35 @@ async function main() {
         eyeClosedness = eyeClosednessOf([leftResult, rightResult]);
         mouthOpenness = mouthResult ? mouthResult.openness : null;
         if (result.facialTransformationMatrixes.length) {
-          const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+          const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data, lm, w, h);
           headResult = headPoseStatus(headPose.pitch, headPose.roll, lm);
           headDroop = headResult?.droop ?? null;
         }
       }
+      drawBody(bodyResult);
       // A frame still in flight when the camera stops must not overwrite the idle dashboard or start the alarm.
       if (!cameraActive) return;
       const now = performance.now() / 1000;
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
+      const slumpStatus = slumpMonitor.update(bodySmoother.add(!faceFound && bodyResult && bodyBase ? bodyResult.score : null), now);
 
-      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, faceFound, now);
+      const wasAsking = checkInMonitor.asking;
+      const checkInStatus = checkInMonitor.update(eyeClosedness !== null, faceFound || bodyResult !== null, checkInAnswered, now);
+      checkInAnswered = false;
+      const stamp = new Date().toLocaleTimeString([], { hour12: false });
+      if (checkInMonitor.asking && !wasAsking) {
+        checkInBeep();
+        dashEvents.unshift({ time: stamp, level: 0, reason: "check-in asked" });
+        session.event("Check-in asked");
+      } else if (checkInMonitor.justAnswered) {
+        dashEvents.unshift({ time: stamp, level: 0, reason: `check-in answered in ${checkInMonitor.lastReaction.toFixed(1)}s` });
+        session.event(`Check-in answered in ${checkInMonitor.lastReaction.toFixed(1)}s`);
+      }
+      checkInBtn.hidden = !checkInMonitor.asking;
+
+      const escalation = escalationMonitor.update({ eyes: eyeStatus, mouth: yawnStatus, head: nodStatus, body: slumpStatus, checkIn: checkInStatus }, faceFound || bodyResult !== null, now);
       if (escalation.level !== sessionLevel) {
         sessionLevel = escalation.level;
         session.event(escalation.reason ? `${REPORT_LEVEL_NAMES[escalation.level]}: ${escalation.reason}` : REPORT_LEVEL_NAMES[escalation.level]);
@@ -940,7 +1078,7 @@ async function main() {
       const ears = [leftResult, rightResult].filter(Boolean).map((r) => r.ear);
       session.add(
         Date.now() / 1000,
-        !faceFound && escalation.level === 0 ? "No face" : REPORT_LEVEL_NAMES[escalation.level],
+        !faceFound && escalation.level === 0 ? { no_face: "No face", face_covered: "Face covered" }[idleState(faceFound, bodyResult)] : REPORT_LEVEL_NAMES[escalation.level],
         { ear: ears.length ? ears.reduce((a, b) => a + b, 0) / ears.length : null, mar: mouthResult?.mar ?? null, headDown: headResult?.pitch ?? null, headTilt: headResult?.roll ?? null },
         { earClosed: earCfg.closedThreshold, headDown: headPoseCfg.droopedThreshold, headTilt: headPoseCfg.rollDroopedThreshold },
       );
@@ -950,7 +1088,7 @@ async function main() {
       const fps = now > prevTime ? 1.0 / (now - prevTime) : 0.0;
       prevTime = now;
       updateDashboard({
-        escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult,
+        escalation, faceFound, left: leftResult, right: rightResult, mouth: mouthResult, head: headResult, body: bodyResult,
         statuses: { eyes: eyeStatus, mouth: yawnStatus, head: nodStatus }, fps, brightness,
         sharpness: faceFound ? faceSharpness(glareCleanCanvas, result.faceLandmarks[0]) : null,
       });
@@ -1097,7 +1235,7 @@ async function handleImageUpload(file, alreadyMirrored = false) {
   const mouth = regions.mouth ? drawMouth(predictions.mouth, mouthAspectRatio(lm, w, h), lm) : null;
   let head = null;
   if (result.facialTransformationMatrixes.length) {
-    const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data);
+    const headPose = headPoseFromTransformMatrix(result.facialTransformationMatrixes[0].data, lm, w, h);
     head = headPoseStatus(headPose.pitch, headPose.roll, lm);
   }
   const eyeClosedness = eyeClosednessOf([left, right]);
@@ -1202,6 +1340,7 @@ function stopCamera() {
   stopAlarm();
   playStopSound();
   muteBtn.hidden = true;
+  checkInBtn.hidden = true;
   cameraIcon.style.display = "";
   liveDot.hidden = true;
   resetDashboard();
@@ -1248,6 +1387,17 @@ exportBtn.addEventListener("click", () => {
   session.drawReport(reportCanvas);
   reportCanvas.toBlob((blob) => blob && download(blob, `${stem}.png`), "image/png");
   download(new Blob([session.csv()], { type: "text/csv" }), `${stem}.csv`);
+});
+
+checkInBtn.addEventListener("click", () => {
+  checkInAnswered = true;
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.code === "Space" && !checkInBtn.hidden) {
+    event.preventDefault();
+    checkInAnswered = true;
+  }
 });
 
 muteBtn.addEventListener("click", () => {

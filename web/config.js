@@ -6,12 +6,17 @@ const CONFIG = {
   ],
   "eyeClassNames": [
     "eyes_closed",
-    "eyes_opened"
+    "eyes_opened",
+    "blocked"
   ],
   "yawnClassNames": [
     "no_yawn",
     "yawn"
   ],
+  "eyeUnreadable": {
+    "className": "blocked",
+    "threshold": 0.9
+  },
   "alertness": {
     "closedDurationThresholdSec": 1.5,
     "perclosWindowSec": 5.0,
@@ -31,6 +36,17 @@ const CONFIG = {
     "perclosThreshold": 0.9,
     "closednessThreshold": 1.0,
     "dipGracePeriodSec": 0.0
+  },
+  "slump": {
+    "closedDurationThresholdSec": 2.0,
+    "perclosWindowSec": 6.0,
+    "perclosThreshold": 0.9,
+    "closednessThreshold": 1.0,
+    "dipGracePeriodSec": 0.5
+  },
+  "checkIn": {
+    "blindSec": 60.0,
+    "answerSec": 5.0
   },
   "ear": {
     "openThreshold": 0.35,
@@ -59,13 +75,24 @@ const CONFIG = {
     "persistSec": {
       "eyes": 3.0,
       "mouth": null,
-      "head": 4.0
+      "head": 4.0,
+      "body": 4.0,
+      "checkIn": 5.0
     },
     "repeatCount": {
       "eyes": 2,
       "mouth": 3,
-      "head": 2
+      "head": 2,
+      "body": 2,
+      "checkIn": 2
     }
+  },
+  "body": {
+    "everyNFrames": 3,
+    "minVisibility": 0.5,
+    "dropLimit": 0.1,
+    "leanLimitDeg": 10.0,
+    "headDropLimit": 0.25
   },
   "live": {
     "minCnnConfidence": 0.65,

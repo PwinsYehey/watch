@@ -91,7 +91,7 @@ function alignedCropFromLandmarks(landmarks, ids, axis, w, h, margin, square = f
 }
 
 // Approximates the solvePnP head pose from MediaPipe's transform matrix, in degrees.
-function headPoseFromTransformMatrix(data) {
+function headPoseFromTransformMatrix(data, landmarks, w, h) {
   const r = [data[0], data[1], data[2], data[4], data[5], data[6], data[8], data[9], data[10]];
   const sy = Math.sqrt(r[0] * r[0] + r[3] * r[3]);
   const pitchRad = sy < 1e-6 ? Math.atan2(-r[5], r[4]) : Math.atan2(r[7], r[8]);
@@ -100,8 +100,31 @@ function headPoseFromTransformMatrix(data) {
   // Flip the sign so nodding forward increases pitch, as in live.py.
   const pitch = -normalized;
 
-  const rollRad = Math.atan2(r[3], r[0]);
-  const roll = Math.abs((rollRad * 180) / Math.PI);
+  return { pitch, roll: eyeLineRoll(landmarks, w, h) };
+}
 
-  return { pitch, roll };
+function eyeLineRoll(landmarks, w, h) {
+  const a = landmarks[LEFT_EYE_AXIS[0]], b = landmarks[RIGHT_EYE_AXIS[1]];
+  return Math.abs((Math.atan2((b.y - a.y) * h, (b.x - a.x) * w) * 180) / Math.PI);
+}
+
+// Mirrors shoulders and body_slump in src/watch/body.py.
+const NOSE = 0, LEFT_SHOULDER = 11, RIGHT_SHOULDER = 12;
+
+function shouldersFromPose(landmarks, w, h, minVisibility) {
+  const left = landmarks[LEFT_SHOULDER], right = landmarks[RIGHT_SHOULDER];
+  if (Math.min(left.visibility ?? 0, right.visibility ?? 0) < minVisibility) return null;
+  const lx = left.x * w, ly = left.y * h, rx = right.x * w, ry = right.y * h;
+  const width = Math.hypot(lx - rx, ly - ry);
+  if (width < 1) return null;
+  const nose = landmarks[NOSE];
+  const head = (nose.visibility ?? 0) >= minVisibility ? (nose.y * h - (ly + ry) / 2) / width : null;
+  return { centerX: (lx + rx) / 2, centerY: (ly + ry) / 2, width, tilt: (Math.atan2(ry - ly, Math.abs(rx - lx)) * 180) / Math.PI, left: { x: lx, y: ly }, right: { x: rx, y: ry }, head };
+}
+
+function bodySlump(pose, baseline, cfg) {
+  const drop = Math.max(0, (pose.centerY - baseline.centerY) / baseline.width);
+  const lean = Math.abs(pose.tilt - baseline.tilt);
+  const headDrop = pose.head != null && baseline.head != null ? Math.max(0, pose.head - baseline.head) : null;
+  return { score: Math.min(1, Math.max(drop / cfg.dropLimit, lean / cfg.leanLimitDeg, (headDrop ?? 0) / cfg.headDropLimit)), drop, lean, headDrop };
 }

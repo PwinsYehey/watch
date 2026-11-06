@@ -1,4 +1,4 @@
-from watch.alertness import AlertnessMonitor, AlertnessStatus, EscalationMonitor, RollingMedian, head_droop
+from watch.alertness import AlertnessMonitor, AlertnessStatus, CheckInMonitor, EscalationMonitor, RollingMedian, head_droop
 
 
 def _monitor(grace=0.0):
@@ -123,3 +123,49 @@ def test_head_droop_counts_diagonal_tilts():
 
 def test_head_droop_ignores_looking_up():
     assert head_droop(-20.0, 2.0, HEAD) == 0.0
+
+
+def test_check_in_is_asked_only_after_the_eyes_stay_unreadable():
+    check_in = CheckInMonitor(blind_sec=60, answer_sec=5)
+    assert check_in.update(False, True, False, 0).state == "alert" and not check_in.asking
+    check_in.update(False, True, False, 59)
+    assert not check_in.asking
+    assert check_in.update(False, True, False, 60).state == "alert" and check_in.asking
+
+
+def test_answered_check_in_resets_and_records_reaction_time():
+    check_in = CheckInMonitor(blind_sec=60, answer_sec=5)
+    check_in.update(False, True, False, 0)
+    check_in.update(False, True, False, 60)
+    status = check_in.update(False, True, True, 61.5)
+    assert status.state == "alert" and not check_in.asking and check_in.just_answered and check_in.last_reaction == 1.5
+    check_in.update(False, True, False, 120)
+    assert not check_in.asking
+
+
+def test_unanswered_check_in_is_not_alert():
+    check_in = CheckInMonitor(blind_sec=60, answer_sec=5)
+    check_in.update(False, True, False, 0)
+    check_in.update(False, True, False, 60)
+    status = check_in.update(False, True, False, 67)
+    assert status.state == "not_alert" and status.closed_duration == 2
+
+
+def test_readable_eyes_or_an_empty_seat_cancel_the_check_in():
+    check_in = CheckInMonitor(blind_sec=60, answer_sec=5)
+    check_in.update(False, True, False, 0)
+    check_in.update(False, True, False, 60)
+    check_in.update(True, True, False, 61)
+    assert not check_in.asking
+    assert check_in.update(False, False, False, 200).state == "no_face"
+
+
+def test_unanswered_check_in_warns_then_turns_critical():
+    monitor = EscalationMonitor(30.0, 10.0, {"check_in": 5.0}, {"check_in": 2})
+    check_in = CheckInMonitor(blind_sec=60, answer_sec=5)
+    for now in (0, 60, 64):
+        assert monitor.update({"check_in": check_in.update(False, True, False, now)}, True, now).level == 0
+    status = monitor.update({"check_in": check_in.update(False, True, False, 65)}, True, 65)
+    assert status.level == 1 and status.reason == "no check-in answer"
+    status = monitor.update({"check_in": check_in.update(False, True, False, 70)}, True, 70)
+    assert status.level == 2 and status.reason == "no check-in answer too long"

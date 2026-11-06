@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from watch.data.extract import parse_nthu, parse_yawdd
-from watch.data.manifest import build_cew, build_mrl_eye, build_nthu_eye, build_yawdd
+from watch.data.manifest import build_cew, build_mrl_eye, build_nthu_eye, build_yawdd, build_yawdd_eye
 
 
 def _touch(root: Path, *names: str) -> None:
@@ -40,3 +40,10 @@ def test_folder_labelled_datasets(tmp_path):
     assert sorted(build_nthu_eye(tmp_path)["label"]) == ["eyes_closed", "eyes_opened"]
     _touch(tmp_path, "yawn/male9_Glasses_yawning_00003.jpg", "no_yawn/female1_NoGlasses_normal_00000.jpg")
     assert build_yawdd(tmp_path).set_index("subject_id")["label"].to_dict() == {"male9": "yawn", "female1": "no_yawn"}
+
+
+def test_blocked_crops_keep_their_subject(tmp_path):
+    _touch(tmp_path, "mrl/blocked/s0003_b00001_0_0_b_0_0_01.png", "cew/blockedEyes/face_2_L.jpg", "yawdd/blocked/female17_sun_x_00001_left.png")
+    assert build_mrl_eye(tmp_path / "mrl").set_index("subject_id")["label"].to_dict() == {"s0003": "blocked"}
+    assert build_cew(tmp_path / "cew").set_index("subject_id")["label"].to_dict() == {"face_2": "blocked"}
+    assert build_yawdd_eye(tmp_path / "yawdd").set_index("subject_id")["label"].to_dict() == {"female17": "blocked"}

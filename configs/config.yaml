@@ -15,20 +15,32 @@ datasets:
     mrl_eye: eye/mrl_eye
     cew: eye/cew
     nthu_eye: eye/nthu_eye
+    yawdd_eye: eye/yawdd_eye
   yawn:
     yawdd: yawn/yawdd
 
 split:
   ratios: {train: 0.70, val: 0.20, test: 0.10}
-  # NTHU has only 4 subjects, so pin two of them out of train.
-  force: {"nthu_eye::002": test, "nthu_eye::006": val}
+  # NTHU has only 4 subjects and YawDD only 13 people in sunglasses, so pin some of them out of train.
+  force:
+    {
+      "nthu_eye::002": test,
+      "nthu_eye::006": val,
+      "yawdd_eye::female17": test,
+      "yawdd_eye::female22": test,
+      "yawdd_eye::male38": test,
+      "yawdd_eye::female18": val,
+      "yawdd_eye::male36": val,
+    }
 
 image_size: [64, 64]
 
 models:
   eye:
-    class_names: [eyes_closed, eyes_opened]
+    class_names: [eyes_closed, eyes_opened, blocked]
     positive_class: eyes_closed
+    unreadable_class: blocked
+    unreadable_threshold: 0.9
     grayscale: true
     architecture: custom_cnn
     dropout_rate: 0.5
@@ -83,8 +95,8 @@ yawn:
 escalation:
   window_sec: 30.0
   calm_sec: 5.0
-  persist_sec: {eyes: 3.0, mouth: null, head: 4.0}
-  repeat_count: {eyes: 2, mouth: 3, head: 2}
+  persist_sec: {eyes: 3.0, mouth: null, head: 4.0, body: 4.0, check_in: 5.0}
+  repeat_count: {eyes: 2, mouth: 3, head: 2, body: 2, check_in: 2}
 
 # Head counts as drooped only once it reaches the full drooped angle below.
 nod:
@@ -93,6 +105,26 @@ nod:
   perclos_threshold: 0.9
   closedness_threshold: 1.0
   dip_grace_period_sec: 0.0
+
+# Upper-body posture from the shoulders, against the calibrated sitting posture. Shown on the dashboard only for now.
+body:
+  every_n_frames: 3
+  min_visibility: 0.5
+  # Slumped once the shoulders drop this many shoulder widths, or the shoulder line tilts this far past calibration.
+  drop_limit: 0.10
+  lean_limit_deg: 10.0
+  head_drop_limit: 0.25
+
+check_in:
+  blind_sec: 60.0
+  answer_sec: 5.0
+
+slump:
+  closed_duration_threshold_sec: 2.0
+  perclos_window_sec: 6.0
+  perclos_threshold: 0.9
+  closedness_threshold: 1.0
+  dip_grace_period_sec: 0.5
 
 # Defaults used until per-user calibration replaces them.
 ear:
@@ -120,9 +152,9 @@ calibration:
 
 live:
   min_cnn_confidence: 0.65
-  # shape_gate: the CNN counts only when the eye shape also looks closed. cnn: the CNN decides alone,
-  # for a model fine-tuned on recordings through tinted lenses, where the eye shape is a guess.
-  eye_decision: cnn
+  # shape_gate: the eye shape and the CNN must agree, and an eye they disagree on is unreadable. cnn: the CNN
+  # decides alone, for a model fine-tuned with `watch finetune` on recordings through tinted lenses, where the shape is a guess.
+  eye_decision: shape_gate
   ear_glare_tolerance: 0.15
   low_detail_std: 12.0
   # Frames darker than low_light_mean are brightened to low_light_target.

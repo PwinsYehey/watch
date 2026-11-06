@@ -52,6 +52,12 @@ def test_keys_reach_the_monitor(served):
         _request(port, "/key/x", "POST")
 
 
+def test_check_in_answer_arrives_as_the_space_bar(served):
+    port, running = served()
+    assert _request(port, "/key/a", "POST")[0] == 204
+    assert running.show(None, 1) == ord(" ")
+
+
 def test_shutdown_is_off_unless_allowed(served, monkeypatch):
     ran = []
     monkeypatch.setattr(stream.subprocess, "run", lambda *args, **kwargs: ran.append(args))

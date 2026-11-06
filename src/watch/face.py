@@ -132,7 +132,12 @@ def head_pose(landmarks, w: int, h: int) -> tuple[float, float] | None:
     angles, *_ = cv2.RQDecomp3x3(cv2.Rodrigues(rvec)[0])
     # solvePnP reads a neutral head near +-180 pitch, so shift it to read near 0.
     pitch = ((float(angles[0]) + 360.0) % 360.0) - 180.0
-    return pitch, abs(float(angles[2]))
+    return pitch, eye_line_roll(landmarks, w, h)
+
+
+def eye_line_roll(landmarks, w: int, h: int) -> float:
+    a, b = landmarks[LEFT_EYE_AXIS[0]], landmarks[RIGHT_EYE_AXIS[1]]
+    return abs(float(np.degrees(np.arctan2((b.y - a.y) * h, (b.x - a.x) * w))))
 
 
 def mean_brightness(image: np.ndarray) -> float:

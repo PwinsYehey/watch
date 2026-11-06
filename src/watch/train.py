@@ -44,7 +44,9 @@ def train(name: str, force: bool = False) -> None:
 
     current_path = model_path(name)
     candidate_score = _val_accuracy(model, datasets["val"])
-    current_score = _val_accuracy(load_model(name), datasets["val"]) if current_path.exists() else None
+    current = load_model(name) if current_path.exists() else None
+    same_classes = current is not None and current.output_shape[-1] == len(spec["class_names"])
+    current_score = _val_accuracy(current, datasets["val"]) if same_classes else None
     print(f"[{name}] val accuracy: candidate {candidate_score:.4f}, current {current_score if current_score is None else f'{current_score:.4f}'}")
 
     if force or current_score is None or candidate_score > current_score:
