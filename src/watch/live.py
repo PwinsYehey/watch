@@ -1,4 +1,6 @@
+import shutil
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -58,15 +60,48 @@ def linear_score(value: float, low: float, high: float) -> float:
     return 0.0 if high == low else min(1.0, max(0.0, (value - low) / (high - low)))
 
 
+def eye_closedness(shape_closed: bool, glare: bool, cnn_closed: float, mode: str = "shape_gate") -> float:
+    """How closed one eye looks, from 0 to 1, by the eye_decision mode in config.yaml."""
+    if mode == "cnn":
+        return cnn_closed
+    # An open eye shape overrules the CNN, which misreads soft IR crops as closed, unless glare makes the shape unreliable.
+    cnn_score = cnn_closed if shape_closed or glare else 0.0
+    return max(float(shape_closed and not glare), cnn_score)
+
+
+def ear_thresholds(ears: list[float], settings: dict) -> dict | None:
+    """Per-user EAR thresholds from calibration, or None when too few or too narrow readings, such as eyes behind sunglasses."""
+    if len(ears) < 10:
+        return None
+    baseline = statistics.median(ears)
+    if baseline < settings["min_open_ear"]:
+        return None
+    return {"open_threshold": baseline, "closed_threshold": baseline - settings["closed_offset"]}
+
+
 class _Quit(Exception):
     pass
 
 
-class Alarm:
-    """Repeating beep while active, using winsound on Windows and the terminal bell elsewhere."""
+class Buzzer:
+    """Active-low buzzer module on a Raspberry Pi GPIO pin, switched with pinctrl."""
 
-    def __init__(self):
+    def __init__(self, pin: int):
+        self._pin = str(pin)
+        self.set(False)
+
+    def set(self, on: bool):
+        subprocess.run(["pinctrl", "set", self._pin, "op", "dl" if on else "dh"], check=False)
+
+
+class Alarm:
+    """Repeating beep while active, on a GPIO buzzer when one is set and pinctrl exists, else winsound on Windows or the terminal bell."""
+
+    def __init__(self, buzzer_pin: int | None = None):
         self._active = threading.Event()
+        self._lock = threading.Lock()
+        self._closed = False
+        self._buzzer = Buzzer(buzzer_pin) if buzzer_pin is not None and shutil.which("pinctrl") else None
         threading.Thread(target=self._loop, daemon=True).start()
 
     def set(self, active: bool):
@@ -75,15 +110,34 @@ class Alarm:
     def is_active(self) -> bool:
         return self._active.is_set()
 
+    def close(self):
+        """Stops beeping and leaves the buzzer silent, since the pin keeps its state after exit."""
+        self._active.clear()
+        with self._lock:
+            self._closed = True
+            if self._buzzer:
+                self._buzzer.set(False)
+
+    def beep(self, seconds: float = 0.25):
+        """One beep of the given length, also used for recording cues."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._buzzer:
+                self._buzzer.set(True)
+                time.sleep(seconds)
+                self._buzzer.set(False)
+            elif sys.platform == "win32":
+                import winsound
+
+                winsound.Beep(880, int(seconds * 1000))
+            else:
+                print("\a", end="", flush=True)
+
     def _loop(self):
         while True:
             self._active.wait()
-            if sys.platform == "win32":
-                import winsound
-
-                winsound.Beep(880, 250)
-            else:
-                print("\a", end="", flush=True)
+            self.beep()
             time.sleep(0.25)
 
 
@@ -99,7 +153,7 @@ class LiveMonitor:
         if not self.capture.isOpened():
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
         self.tracker = FaceTracker()
-        self.alarm = Alarm()
+        self.alarm = Alarm(self.settings.get("buzzer_gpio"))
         self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active, allow_shutdown)
         self.view = ui.DashboardView()
         self.events = deque(maxlen=50)
@@ -182,12 +236,14 @@ class LiveMonitor:
             self._handle_key(self.display.show(view, 1))
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
-        self.calibrated = len(ears) >= 10
-        if not self.calibrated:
-            print("Calibration found no face, using default thresholds.")
+        thresholds = ear_thresholds(ears, settings)
+        self.calibrated = thresholds is not None
+        if thresholds:
+            self.ear = thresholds
+        elif len(ears) >= 10:
+            print("Calibration saw no clearly open eyes, such as behind sunglasses, so the default eye thresholds stay.")
         else:
-            baseline = statistics.median(ears)
-            self.ear = {"open_threshold": baseline, "closed_threshold": baseline - settings["closed_offset"]}
+            print("Calibration found no face, using default thresholds.")
         if len(pitches) >= 10:
             pitch, roll = statistics.median(pitches), statistics.median(rolls)
             self.head = {
@@ -205,9 +261,7 @@ class LiveMonitor:
             return None
         glare = glare_fraction(frame, eye.box) >= self.settings["ear_glare_tolerance"]
         shape_closed = eye.ratio <= self.ear["closed_threshold"]
-        # An open eye shape overrules the CNN, which misreads soft IR crops as closed, unless glare makes the shape unreliable.
-        cnn_score = cnn_closed if shape_closed or glare else 0.0
-        closedness = self.smoothers[side].add(max(float(shape_closed and not glare), cnn_score))
+        closedness = self.smoothers[side].add(eye_closedness(shape_closed, glare, cnn_closed, self.settings["eye_decision"]))
         return {"score": closedness, "label": "closed" if closedness >= 0.5 else "open", "ratio": eye.ratio}
 
     def _mouth(self, mouth):
@@ -401,7 +455,7 @@ class LiveMonitor:
         except _Quit:
             pass
         finally:
-            self.alarm.set(False)
+            self.alarm.close()
             self.capture.release()
             self.tracker.close()
             self.display.close()

@@ -215,9 +215,29 @@ The exposure and colour settings are in the `rpicam-vid` command in `src/watch/c
 
 | Setting | Now | Effect |
 |---|---|---|
-| `--ev` | `-1` | Lower is darker. At `-2` the face was too dim and the eye model misread it; with no lowering the IR LEDs washed the face out. |
+| `--ev` | `0` | Tuned for a lit room. At `-1` the face behind sunglasses went almost black. In a fully dark room with one IR module the lenses stay black at `0`; `1` showed the eyes but washed out the face and dropped to 5 fps, so the project stays on a lit room. |
 | `--saturation` | `0` | Black and white. In colour, the camera's lack of an IR filter turned the face solid pink and the eyes could not be read. |
-| `--metering` | `spot` | Sets the brightness from the centre of the picture, where the face should be. |
+| `--metering` | `centre` | Sets the brightness from a wide area around the centre. `spot` darkened the face whenever it moved off the small centre spot onto the wall behind. |
+
+## Training on your own recordings
+
+Behind tinted lenses the eye shape is a guess, so the eye model has to decide. These steps teach it your lenses and IR light. Stop the service first, since the camera can be used by one program at a time.
+
+1. Record a take per person and per condition, such as with and without sunglasses. The buzzer cues each part: one beep, eyes open; two beeps, eyes closed; a long beep, done. **Pi:**
+
+   ```bash
+   cd ~/watch && .venv/bin/python -m watch record yeri shades1 --camera pi
+   ```
+
+2. With at least two takes, fine-tune. A quarter of the takes are held out, and the model is replaced only if those score higher. The original stays as `models/eye_model.base.keras`. **Pi:**
+
+   ```bash
+   cd ~/watch && .venv/bin/python -m watch finetune
+   ```
+
+3. If the held-out closed-eye recall improved, set `eye_decision: cnn` under `live` in `configs/config.yaml` so the model decides on its own, then start the service again.
+
+Calibration ignores eyes it cannot see clearly (`min_open_ear` under `calibration`), so starting with sunglasses on keeps the default eye thresholds instead of learning wrong ones.
 
 ## Updating the code on the Pi
 
