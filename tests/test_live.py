@@ -15,8 +15,9 @@ class _Model:
         return "label", 0.9, self.positive
 
 
-def _monitor(yawn_open=0.0):
+def _monitor(yawn_open=0.0, eye_decision="shape_gate"):
     config = load_config()
+    config["live"]["eye_decision"] = eye_decision
     monitor = object.__new__(LiveMonitor)
     monitor.config, monitor.settings = config, config["live"]
     monitor.ear = {"open_threshold": 0.30, "closed_threshold": 0.20}
@@ -60,3 +61,7 @@ def test_eye_the_model_calls_blocked_is_unreadable():
 def test_screen_says_face_covered_only_when_a_person_is_still_in_view():
     assert LiveMonitor._idle_state(None, {"body": {"label": "upright"}}) == "face_covered"
     assert LiveMonitor._idle_state(None, {"body": None}) == "no_face"
+
+
+def test_cnn_mode_trusts_the_eye_model_even_when_the_shape_looks_open():
+    assert _monitor(eye_decision="cnn")._eye(FRAME, "left", _eye(0.29), ("eyes_closed", 0.9, 0.9))["label"] == "closed"

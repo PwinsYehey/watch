@@ -55,7 +55,14 @@ def build_yawdd(root: Path) -> pd.DataFrame:
     return _build_labeled_folders("yawdd", root, {"yawn": "yawn", "no_yawn": "no_yawn"})
 
 
-BUILDERS = {"mrl_eye": build_mrl_eye, "cew": build_cew, "nthu_eye": build_nthu_eye, "yawdd_eye": build_yawdd_eye, "yawdd": build_yawdd}
+def build_own_eye(root: Path) -> pd.DataFrame:
+    """Crops from `watch record`, named <subject>_<take>_<side>_<n>, with a take_id so whole takes can be held out."""
+    rows = _build_labeled_folders("own_eye", root, {"open": "eyes_opened", "closed": "eyes_closed"})
+    rows["take_id"] = rows["filepath"].map(lambda p: "_".join(Path(p).stem.split("_")[:2]))
+    return rows
+
+
+BUILDERS = {"mrl_eye": build_mrl_eye, "cew": build_cew, "nthu_eye": build_nthu_eye, "yawdd_eye": build_yawdd_eye, "yawdd": build_yawdd, "own_eye": build_own_eye}
 
 
 def build_manifest(name: str) -> pd.DataFrame:

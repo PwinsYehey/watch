@@ -1,4 +1,6 @@
+import shutil
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -10,10 +12,12 @@ import numpy as np
 from watch import dashboard as ui
 from watch.alertness import AlertnessMonitor, CheckInMonitor, EscalationMonitor, RollingMedian, head_droop
 from watch.body import BodyPose, BodyTracker, body_slump
+from watch.camera import open_camera
 from watch.config import load_config
 from watch.report import LEVEL_NAMES, SessionLog
 from watch.face import FACE_MESH, FaceTracker, brighten, face_sharpness, mean_brightness
 from watch.model import Classifier
+from watch.stream import BrowserStream, Window
 
 WINDOW = "WATCH - Live Alertness Monitoring"
 # Marker colours on the video, as BGR.
@@ -57,56 +61,102 @@ def linear_score(value: float, low: float, high: float) -> float:
     return 0.0 if high == low else min(1.0, max(0.0, (value - low) / (high - low)))
 
 
+def eye_closedness(shape_closed: bool, glare: bool, cnn_closed: float, mode: str = "shape_gate") -> float:
+    """How closed one eye looks, from 0 to 1, by the eye_decision mode in config.yaml."""
+    if mode == "cnn":
+        return cnn_closed
+    # An open eye shape overrules the CNN, which misreads soft IR crops as closed, unless glare makes the shape unreliable.
+    cnn_score = cnn_closed if shape_closed or glare else 0.0
+    return max(float(shape_closed and not glare), cnn_score)
+
+
+def ear_thresholds(ears: list[float], settings: dict) -> dict | None:
+    """Per-user EAR thresholds from calibration, or None when too few or too narrow readings, such as eyes behind sunglasses."""
+    if len(ears) < 10:
+        return None
+    baseline = statistics.median(ears)
+    if baseline < settings["min_open_ear"]:
+        return None
+    return {"open_threshold": baseline, "closed_threshold": baseline - settings["closed_offset"]}
+
+
 class _Quit(Exception):
     pass
 
 
-class Alarm:
-    """Repeating beep while active, using winsound on Windows and the terminal bell elsewhere."""
+class Buzzer:
+    """Active-low buzzer module on a Raspberry Pi GPIO pin, switched with pinctrl."""
 
-    def __init__(self):
+    def __init__(self, pin: int):
+        self._pin = str(pin)
+        self.set(False)
+
+    def set(self, on: bool):
+        subprocess.run(["pinctrl", "set", self._pin, "op", "dl" if on else "dh"], check=False)
+
+
+class Alarm:
+    """Repeating beep while active, on a GPIO buzzer when one is set and pinctrl exists, else winsound on Windows or the terminal bell."""
+
+    def __init__(self, buzzer_pin: int | None = None):
         self._active = threading.Event()
+        self._lock = threading.Lock()
+        self._closed = False
+        self._buzzer = Buzzer(buzzer_pin) if buzzer_pin is not None and shutil.which("pinctrl") else None
         threading.Thread(target=self._loop, daemon=True).start()
 
     def set(self, active: bool):
         self._active.set() if active else self._active.clear()
 
-    @staticmethod
-    def beep():
-        if sys.platform == "win32":
-            import winsound
+    def is_active(self) -> bool:
+        return self._active.is_set()
 
-            threading.Thread(target=winsound.Beep, args=(660, 400), daemon=True).start()
-        else:
-            print("\a", end="", flush=True)
+    def close(self):
+        """Stops beeping and leaves the buzzer silent, since the pin keeps its state after exit."""
+        self._active.clear()
+        with self._lock:
+            self._closed = True
+            if self._buzzer:
+                self._buzzer.set(False)
+
+    def beep(self, seconds: float = 0.25):
+        """One beep of the given length, also used for recording cues."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._buzzer:
+                self._buzzer.set(True)
+                time.sleep(seconds)
+                self._buzzer.set(False)
+            elif sys.platform == "win32":
+                import winsound
+
+                winsound.Beep(880, int(seconds * 1000))
+            else:
+                print("\a", end="", flush=True)
 
     def _loop(self):
         while True:
             self._active.wait()
-            if sys.platform == "win32":
-                import winsound
-
-                winsound.Beep(880, 250)
-            else:
-                print("\a", end="", flush=True)
+            self.beep()
             time.sleep(0.25)
 
 
 class LiveMonitor:
-    def __init__(self, camera: int):
+    def __init__(self, camera, stream_port: int | None = None, allow_shutdown: bool = False):
         config = load_config()
         self.config = config
         self.settings = config["live"]
         self.eye_model, self.yawn_model = Classifier("eye"), Classifier("yawn")
         self.ear, self.head = config["ear"], config["head_pose"]
         self._camera = camera
-        self._backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
-        self.capture = cv2.VideoCapture(camera, self._backend)
+        self.capture = open_camera(camera)
         if not self.capture.isOpened():
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
-        self.tracker = FaceTracker()
+        self.tracker = FaceTracker(lift_contrast=camera == "pi")
         self.body_tracker, self.body_base = BodyTracker(config["body"]), None
-        self.alarm = Alarm()
+        self.alarm = Alarm(self.settings.get("buzzer_gpio"))
+        self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active, allow_shutdown)
         self.view = ui.DashboardView()
         self.events = deque(maxlen=50)
         self.calibrated = False
@@ -156,7 +206,7 @@ class LiveMonitor:
             if now >= next_retry:
                 next_retry = now + self.settings["camera_retry_sec"]
                 self.capture.release()
-                self.capture = cv2.VideoCapture(self._camera, self._backend)
+                self.capture = open_camera(self._camera)
                 if self.capture.isOpened() and (frame := self._read()) is not None:
                     self.alarm.set(False)
                     print("Camera back.")
@@ -166,8 +216,7 @@ class LiveMonitor:
             level = ui.Level(name, color, "check the camera connection", f"lost {lost_for:.0f}s" + (" · alarm on" if alarming else ""))
             frame = self._last_frame if self._last_frame is not None else np.zeros((480, 640, 3), np.uint8)
             view = self.view.render((frame * 0.3).astype(np.uint8), level, [], [], [], self._event_lines(), live=True, muted=self.muted, readings=[])
-            cv2.imshow(WINDOW, view)
-            self._handle_key(cv2.waitKey(30) & 0xFF)
+            self._handle_key(self.display.show(view, 30))
 
     def calibrate(self):
         """Measures this user's resting EAR and head pose so thresholds fit them rather than an average face."""
@@ -191,16 +240,18 @@ class LiveMonitor:
                     rolls.append(regions.roll)
             name, color = ui.LEVELS["calibrating"]
             level = ui.Level(name, color, "look at the camera normally", f"{remaining:.1f}s left")
-            cv2.imshow(WINDOW, self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[]))
-            self._handle_key(cv2.waitKey(1) & 0xFF)
+            view = self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[])
+            self._handle_key(self.display.show(view, 1))
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
-        self.calibrated = len(ears) >= 10
-        if not self.calibrated:
-            print("Calibration found no face, using default thresholds.")
+        thresholds = ear_thresholds(ears, settings)
+        self.calibrated = thresholds is not None
+        if thresholds:
+            self.ear = thresholds
+        elif len(ears) >= 10:
+            print("Calibration saw no clearly open eyes, such as behind sunglasses, so the default eye thresholds stay.")
         else:
-            baseline = statistics.median(ears)
-            self.ear = {"open_threshold": baseline, "closed_threshold": baseline - settings["closed_offset"]}
+            print("Calibration found no face, using default thresholds.")
         if len(pitches) >= 10:
             pitch, roll = statistics.median(pitches), statistics.median(rolls)
             self.head = {
@@ -219,10 +270,11 @@ class LiveMonitor:
         label, confidence, cnn_closed = prediction
         if label == "blocked" or confidence < self.settings["min_cnn_confidence"]:
             return None
-        if cnn_closed >= 0.5 and eye.ratio > (self.ear["open_threshold"] + self.ear["closed_threshold"]) / 2:
+        glare = glare_fraction(frame, eye.box) >= self.settings["ear_glare_tolerance"]
+        if self.settings["eye_decision"] == "shape_gate" and not glare and cnn_closed >= 0.5 and eye.ratio > (self.ear["open_threshold"] + self.ear["closed_threshold"]) / 2:
             return None
-        ear_closed = eye.ratio <= self.ear["closed_threshold"] and glare_fraction(frame, eye.box) < self.settings["ear_glare_tolerance"]
-        closedness = self.smoothers[side].add(max(float(ear_closed), cnn_closed))
+        shape_closed = eye.ratio <= self.ear["closed_threshold"]
+        closedness = self.smoothers[side].add(eye_closedness(shape_closed, glare, cnn_closed, self.settings["eye_decision"]))
         return {"score": closedness, "label": "closed" if closedness >= 0.5 else "open", "ratio": eye.ratio}
 
     def _mouth(self, mouth):
@@ -442,7 +494,7 @@ class LiveMonitor:
                 statuses["check_in"] = self.check_in.update(scores["eyes"] is not None, regions is not None or body is not None, self._answered, now)
                 self._answered = False
                 if self.check_in.asking and not was_asking:
-                    Alarm.beep()
+                    threading.Thread(target=self.alarm.beep, args=(0.4,), daemon=True).start()
                     self.events.append((time.strftime("%H:%M:%S"), 0, "check-in asked"))
                     self.session.event("Check-in asked")
                 elif self.check_in.just_answered:
@@ -460,13 +512,12 @@ class LiveMonitor:
                 sharpness = face_sharpness(brighten(frame, self.settings["low_light_mean"], self.settings["low_light_target"]), regions.landmarks) if regions else None
                 view = self._draw(frame, regions, cues, escalation, statuses, 1.0 / max(now - previous, 1e-6), mean_brightness(frame), sharpness)
                 previous = now
-                cv2.imshow(WINDOW, view)
-                self._handle_key(cv2.waitKey(1) & 0xFF)
+                self._handle_key(self.display.show(view, 1))
         except _Quit:
             pass
         finally:
-            self.alarm.set(False)
+            self.alarm.close()
             self.capture.release()
             self.tracker.close()
             self.body_tracker.close()
-            cv2.destroyAllWindows()
+            self.display.close()

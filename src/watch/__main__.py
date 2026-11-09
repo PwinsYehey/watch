@@ -3,12 +3,13 @@ import os
 import sys
 import warnings
 
+from watch.camera import camera_source
 from watch.config import MODEL_NAMES
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 warnings.filterwarnings("ignore", message="SymbolDatabase.GetPrototype")
 
-TRAINING_ACTIONS = {"fetch-data", "prepare-data", "train", "evaluate", "pipeline"}
+TRAINING_ACTIONS = {"fetch-data", "prepare-data", "train", "finetune", "evaluate", "pipeline"}
 
 
 def _names(target: str) -> tuple[str, ...]:
@@ -63,6 +64,24 @@ def train(args):
             train(name, force=args.force)
 
 
+def record(args):
+    from watch.record import record
+
+    try:
+        record(args.camera, args.subject, args.take)
+    except ValueError as error:
+        sys.exit(str(error))
+
+
+def finetune(args):
+    from watch.finetune import finetune
+
+    try:
+        finetune(force=args.force)
+    except ValueError as error:
+        sys.exit(str(error))
+
+
 def evaluate(args):
     from watch.evaluate import evaluate
 
@@ -86,7 +105,7 @@ def export(_):
 def live(args):
     from watch.live import LiveMonitor
 
-    LiveMonitor(args.camera).run()
+    LiveMonitor(args.camera, args.stream, args.allow_shutdown).run()
 
 
 def web(args):
@@ -140,13 +159,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--sweep", action="store_true", help="run the hyperparameter grid search instead")
     sub.add_argument("--force", action="store_true", help="replace the current model even if the new one scores lower")
     sub.set_defaults(run=train)
+    sub = actions.add_parser("record", help="record labelled eye crops on this camera, cued by the buzzer")
+    sub.add_argument("subject", help="who is recording, letters and digits only")
+    sub.add_argument("take", help="a name for this take, such as shades1 or noshades1")
+    sub.add_argument("--camera", type=camera_source, default=0, help="camera index, or 'pi' for a Raspberry Pi camera module")
+    sub.set_defaults(run=record)
+    sub = actions.add_parser("finetune", help="fine-tune the eye model on recorded crops, keeping it only if held-out takes improve")
+    sub.add_argument("--force", action="store_true", help="replace the current model even if the held-out takes score lower")
+    sub.set_defaults(run=finetune)
     for action, run, help_text in (("evaluate", evaluate, "test-set metrics and plots"), ("benchmark", benchmark, "inference speed and size")):
         sub = actions.add_parser(action, help=help_text)
         sub.add_argument("model", nargs="?", default="all", choices=model_choices)
         sub.set_defaults(run=run)
     actions.add_parser("export", help="write TF.js models, web/config.js and TFLite models").set_defaults(run=export)
     sub = actions.add_parser("live", help="webcam alertness monitor")
-    sub.add_argument("--camera", type=int, default=0)
+    sub.add_argument("--camera", type=camera_source, default=0, help="camera index, or 'pi' for a Raspberry Pi camera module")
+    sub.add_argument("--stream", type=int, nargs="?", const=8766, metavar="PORT", help="show the monitor in a browser on this port instead of a window")
+    sub.add_argument("--allow-shutdown", action="store_true", help="with --stream, add a button to the page that powers this machine off")
     sub.set_defaults(run=live)
     sub = actions.add_parser("web", help="serve the browser demo")
     sub.add_argument("--port", type=int, default=8765)
@@ -168,7 +197,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(f"'{args.action}' runs on the Linux training machine only.")
     try:
         args.run(args)
-    except (FileNotFoundError, ConnectionError) as error:
+    except (FileNotFoundError, FileExistsError, ConnectionError) as error:
         sys.exit(str(error))
 
 

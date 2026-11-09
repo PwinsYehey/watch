@@ -1,0 +1,15 @@
+# systemd user service that runs the live monitor on a Raspberry Pi at boot, for a checkout in ~/watch.
+# Install: copy to ~/.config/systemd/user/watch.service, then
+#   systemctl --user enable --now watch.service && loginctl enable-linger
+[Unit]
+Description=WATCH live alertness monitor
+
+[Service]
+WorkingDirectory=%h/watch
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/watch/scripts/live.sh --camera pi --stream --allow-shutdown
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

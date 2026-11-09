@@ -10,8 +10,9 @@ Two small CNNs (eye open/closed, yawn/no yawn) are combined with MediaPipe face-
 |---|---|---|
 | Linux / WSL2 | data, training, evaluation, export | `./scripts/setup.sh` |
 | Windows | live monitor, photo prediction, web demo | `.\scripts\setup.ps1` |
+| Raspberry Pi | live monitor from a Pi camera, viewed in a browser | `./scripts/setup-pi.sh` |
 
-Both need Python 3.10 to 3.12; the setup scripts install 3.12 through [uv](https://docs.astral.sh/uv/) automatically.
+All need Python 3.10 to 3.12; the setup scripts install 3.12 through [uv](https://docs.astral.sh/uv/) automatically.
 On Windows, allow local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 ## Actions
@@ -27,7 +28,7 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 | `evaluate [eye\|yawn\|all]` | test-set report, confusion matrix and ROC curve in `results/<model>/` |
 | `benchmark [eye\|yawn\|all]` | inference latency and model size |
 | `export` | write `web/models/`, `web/config.js` and `models/*.tflite` |
-| `live` | webcam monitor (`--camera N`): `q` quit, `m` mute, `e` export a session report |
+| `live` | webcam monitor (`--camera N`, or `--camera pi` for a Raspberry Pi camera module; `--stream [PORT]` to view it in a browser, `--allow-shutdown` to add a power-off button there): `q` quit, `m` mute, `e` export a session report |
 | `web` | serve the browser demo at http://localhost:8765 (`--port N`) |
 | `predict <image>` | eye, mouth and head state for one photo |
 | `test` | run the unit tests (extra arguments go to pytest) |
@@ -49,6 +50,22 @@ Every action is `./scripts/<action>.sh` on Linux and `.\scripts\<action>.ps1` on
 10. Export saves a session report: a PNG line graph of the pilot's alertness over time (normal, warning, critical, with no face, calibrating and camera lost shaded), plus a CSV log of every change and its reason (`E` in the live monitor, saved to `results/sessions/`; the Export button in the web demo).
 
 All thresholds live in `configs/config.yaml`; run `export` after changing them so the web demo picks them up.
+
+## Raspberry Pi
+
+A Pi with a camera module and no screen runs the same monitor and shows it in a browser on another machine:
+
+1. Connect the camera ribbon with the Pi powered off, then check it with `rpicam-hello --list-cameras`. An IMX219 camera may need a boot setting first; see the guide.
+2. Run `./scripts/setup-pi.sh` once.
+3. Run `./scripts/live.sh --camera pi --stream` and open `http://<pi address>:8766` on the other machine.
+
+The page has buttons for mute, export and stop (the `m`, `e` and `q` keys also work), and plays the alarm once **Enable alarm sound** is clicked. With `--allow-shutdown` it also has a button that powers the Pi off. Reports are saved on the Pi in `results/sessions/`.
+
+The hardware in use is a Raspberry Pi 4 Model B (8 GB), a 32 GB microSD card and an IMX219 night vision camera with two IR LED modules. The picture is black and white with lowered exposure, so a face near the IR LEDs stays readable.
+
+The full walkthrough, with the hardware, step-by-step use, every command, a troubleshooting table and the known limits, is in [docs/raspberry-pi.md](docs/raspberry-pi.md).
+
+To start the monitor whenever the Pi boots, install [scripts/watch-pi.service](scripts/watch-pi.service) as described at the top of that file. The service restarts the monitor if it stops, so **Stop monitor** then acts as a restart; use `systemctl --user stop watch.service` to stop it for good.
 
 ## Web demo performance
 
