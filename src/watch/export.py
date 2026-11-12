@@ -28,6 +28,7 @@ def web_config_js() -> str:
         "eyeClassNames": config["models"]["eye"]["class_names"],
         "yawnClassNames": config["models"]["yawn"]["class_names"],
         "eyeUnreadable": {"className": config["models"]["eye"]["unreadable_class"], "threshold": config["models"]["eye"]["unreadable_threshold"]},
+        "yawnUnreadable": {"className": config["models"]["yawn"]["unreadable_class"], "threshold": config["models"]["yawn"]["unreadable_threshold"]},
         **{_camel(section): _camelize(config[section]) for section in WEB_CONFIG_SECTIONS},
     }
     return f"// Generated from configs/config.yaml by ./scripts/export.sh, do not edit.\nconst CONFIG = {json.dumps(web_config, indent=2)};\n"
@@ -41,10 +42,23 @@ def _to_keras2_json(node):
             node["dtype"] = node["dtype"]["config"]["name"]
         if "batch_shape" in node:
             node["batch_input_shape"] = node.pop("batch_shape")
+        if isinstance(node.get("inbound_nodes"), list):
+            node["inbound_nodes"] = [_keras2_node(n) if isinstance(n, dict) else n for n in node["inbound_nodes"]]
+        if node.get("class_name") == "Functional":
+            node["class_name"] = "Model"
+        for key in ("input_layers", "output_layers"):
+            if node.get(key) and isinstance(node[key][0], str):
+                node[key] = [node[key]]
         return node
     if isinstance(node, list):
         return [_to_keras2_json(v) for v in node]
     return node
+
+
+def _keras2_node(node):
+    args = node.get("args", [])
+    tensors = args[0] if len(args) == 1 and isinstance(args[0], list) else args
+    return [[*t["config"]["keras_history"], {}] for t in tensors if isinstance(t, dict) and t.get("class_name") == "__keras_tensor__"]
 
 
 def _named_weights(layer):

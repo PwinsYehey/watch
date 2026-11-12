@@ -51,8 +51,10 @@ models:
     early_stopping_patience: 5
     reduce_lr_patience: 2
   yawn:
-    class_names: [no_yawn, yawn]
+    class_names: [no_yawn, yawn, blocked]
     positive_class: yawn
+    unreadable_class: blocked
+    unreadable_threshold: 0.7
     grayscale: false
     architecture: tiny_cnn
     dropout_rate: 0.5

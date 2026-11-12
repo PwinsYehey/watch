@@ -11,11 +11,16 @@ const CONFIG = {
   ],
   "yawnClassNames": [
     "no_yawn",
-    "yawn"
+    "yawn",
+    "blocked"
   ],
   "eyeUnreadable": {
     "className": "blocked",
     "threshold": 0.9
+  },
+  "yawnUnreadable": {
+    "className": "blocked",
+    "threshold": 0.7
   },
   "alertness": {
     "closedDurationThresholdSec": 1.5,
