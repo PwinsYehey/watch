@@ -303,13 +303,13 @@ class LiveMonitor:
         return "face_covered" if regions is None and cues.get("body") else "no_face"
 
     def _body(self, pose):
-        """Shoulder and head posture against calibration; it raises alerts in body mode, or while the face cannot be read."""
+        """Shoulder and head posture against calibration; a raised arm tilts the shoulders, so the lean is ignored while one is up."""
         if pose is None:
             return None
         if self.body_base is None:
             return {"label": "upright", "score": 0.0, "drop": None, "lean": None, "head_drop": None, "forward": None, "pose": pose}
         score, drop, lean, head_drop, forward = body_slump(pose, self.body_base, self.config["body"])
-        return {"label": "slumped" if score >= 1.0 else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "forward": forward, "pose": pose}
+        return {"label": "slumped" if score >= 1.0 else "arm raised" if pose.arm_raised else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "forward": forward, "pose": pose}
 
     def _head(self, pitch, roll):
         if pitch is None:
@@ -385,7 +385,7 @@ class LiveMonitor:
             signs.append(ui.Row(dot, label, state, ui.MUTED if dot == ui.GRAY else dot, f"{statuses[key].closed_duration:.1f}s"))
         body = cues.get("body")
         body_state = body and next((label for key, label in (("body", "slumped"), ("nodding", "nodding"), ("still", "not moving")) if statuses.get(key) and statuses[key].state == "not_alert"), body["label"])
-        body_dot = ui.GRAY if not body else ui.YELLOW if body_state != "upright" else ui.GREEN
+        body_dot = ui.GRAY if not body else ui.YELLOW if body_state in ("slumped", "nodding", "not moving") else ui.GREEN
         signs.append(ui.Row(body_dot, "Body", body_state if body else "not visible", ui.MUTED if body_dot == ui.GRAY else body_dot))
 
         face, dark = regions is not None, brightness < self.settings["low_light_mean"]

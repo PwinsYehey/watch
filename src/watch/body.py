@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import cv2
 import mediapipe as mp
 
-NOSE, LEFT_SHOULDER, RIGHT_SHOULDER = 0, 11, 12
+NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW, LEFT_WRIST, RIGHT_WRIST = 0, 11, 12, 13, 14, 15, 16
 # Nose, eyes, ears and mouth; under a helmet only some stay visible, so the head is their average.
 HEAD_POINTS = range(0, 11)
 
@@ -20,6 +20,7 @@ class BodyPose:
     left: tuple[float, float] | None = None  # shoulder points in pixels, for drawing
     right: tuple[float, float] | None = None
     head: float | None = None
+    arm_raised: bool = False
 
 
 class BodyTracker:
@@ -52,7 +53,15 @@ def shoulders(landmarks, w: int, h: int, min_visibility: float) -> BodyPose | No
         return None
     head_ys = [landmarks[i].y * h for i in HEAD_POINTS if landmarks[i].visibility >= min_visibility]
     head = (sum(head_ys) / len(head_ys) - (ly + ry) / 2) / width if head_ys else None
-    return BodyPose((lx + rx) / 2, (ly + ry) / 2, width, math.degrees(math.atan2(ry - ly, abs(rx - lx))), (lx, ly), (rx, ry), head)
+    return BodyPose((lx + rx) / 2, (ly + ry) / 2, width, math.degrees(math.atan2(ry - ly, abs(rx - lx))), (lx, ly), (rx, ry), head, arm_raised(landmarks, min_visibility))
+
+
+def arm_raised(landmarks, min_visibility: float) -> bool:
+    for shoulder, joints in ((LEFT_SHOULDER, (LEFT_ELBOW, LEFT_WRIST)), (RIGHT_SHOULDER, (RIGHT_ELBOW, RIGHT_WRIST))):
+        top = landmarks[shoulder].y
+        if any(landmarks[j].visibility >= min_visibility and landmarks[j].y < top for j in joints):
+            return True
+    return False
 
 
 def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[float, float, float, float | None, float]:
@@ -61,7 +70,9 @@ def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[floa
     drop = max(0.0, (pose.center_y - baseline.center_y) / baseline.width)
     lean = abs(pose.tilt - baseline.tilt)
     head_drop = max(0.0, pose.head - baseline.head) if pose.head is not None and baseline.head is not None else None
+    # A raised arm tilts the shoulders, so the lean is ignored while one is up.
+    counted_lean = 0.0 if pose.arm_raised else lean
     # Slumping toward the camera brings the shoulders closer, so they look wider.
     forward = max(0.0, pose.width / baseline.width - 1.0)
-    score = max(drop / settings["drop_limit"], lean / settings["lean_limit_deg"], (head_drop or 0.0) / settings["head_drop_limit"], forward / settings["forward_limit"])
+    score = max(drop / settings["drop_limit"], counted_lean / settings["lean_limit_deg"], (head_drop or 0.0) / settings["head_drop_limit"], forward / settings["forward_limit"])
     return min(1.0, score), drop, lean, head_drop, forward
