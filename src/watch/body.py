@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import cv2
 import mediapipe as mp
 
-NOSE, LEFT_SHOULDER, RIGHT_SHOULDER = 0, 11, 12
+NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW, LEFT_WRIST, RIGHT_WRIST = 0, 11, 12, 13, 14, 15, 16
 
 
 @dataclass
@@ -18,6 +18,7 @@ class BodyPose:
     left: tuple[float, float] | None = None  # shoulder points in pixels, for drawing
     right: tuple[float, float] | None = None
     head: float | None = None
+    arm_raised: bool = False
 
 
 class BodyTracker:
@@ -50,7 +51,15 @@ def shoulders(landmarks, w: int, h: int, min_visibility: float) -> BodyPose | No
         return None
     nose = landmarks[NOSE]
     head = (nose.y * h - (ly + ry) / 2) / width if nose.visibility >= min_visibility else None
-    return BodyPose((lx + rx) / 2, (ly + ry) / 2, width, math.degrees(math.atan2(ry - ly, abs(rx - lx))), (lx, ly), (rx, ry), head)
+    return BodyPose((lx + rx) / 2, (ly + ry) / 2, width, math.degrees(math.atan2(ry - ly, abs(rx - lx))), (lx, ly), (rx, ry), head, arm_raised(landmarks, min_visibility))
+
+
+def arm_raised(landmarks, min_visibility: float) -> bool:
+    for shoulder, joints in ((LEFT_SHOULDER, (LEFT_ELBOW, LEFT_WRIST)), (RIGHT_SHOULDER, (RIGHT_ELBOW, RIGHT_WRIST))):
+        top = landmarks[shoulder].y
+        if any(landmarks[j].visibility >= min_visibility and landmarks[j].y < top for j in joints):
+            return True
+    return False
 
 
 def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[float, float, float, float | None]:
@@ -58,5 +67,6 @@ def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[floa
     drop = max(0.0, (pose.center_y - baseline.center_y) / baseline.width)
     lean = abs(pose.tilt - baseline.tilt)
     head_drop = max(0.0, pose.head - baseline.head) if pose.head is not None and baseline.head is not None else None
-    score = max(drop / settings["drop_limit"], lean / settings["lean_limit_deg"], (head_drop or 0.0) / settings["head_drop_limit"])
+    counted_lean = 0.0 if pose.arm_raised else lean
+    score = max(drop / settings["drop_limit"], counted_lean / settings["lean_limit_deg"], (head_drop or 0.0) / settings["head_drop_limit"])
     return min(1.0, score), drop, lean, head_drop

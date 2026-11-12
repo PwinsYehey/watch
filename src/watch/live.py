@@ -292,13 +292,13 @@ class LiveMonitor:
         return "face_covered" if regions is None and cues.get("body") else "no_face"
 
     def _body(self, pose):
-        """Shoulder and head posture against calibration; it raises alerts only while the face cannot be read."""
+        """Shoulder and head posture against calibration; a raised arm tilts the shoulders, so the lean is ignored while one is up."""
         if pose is None:
             return None
         if self.body_base is None:
             return {"label": "upright", "score": 0.0, "drop": None, "lean": None, "head_drop": None, "pose": pose}
         score, drop, lean, head_drop = body_slump(pose, self.body_base, self.config["body"])
-        return {"label": "slumped" if score >= 1.0 else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "pose": pose}
+        return {"label": "slumped" if score >= 1.0 else "arm raised" if pose.arm_raised else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "pose": pose}
 
     def _head(self, pitch, roll):
         if pitch is None:
@@ -485,7 +485,7 @@ class LiveMonitor:
                     "eyes": sum(score * width for score, width in eyes) / eye_weight if eye_weight else None,
                     "mouth": cues["mouth"]["score"] if cues.get("mouth") else None,
                     "head": cues["head"]["score"] if cues.get("head") else None,
-                    "body": body["score"] if regions is None and body and self.body_base else None,
+                    "body": body["score"] if body and self.body_base else None,
                 }
 
                 now = time.time()
