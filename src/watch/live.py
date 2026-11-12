@@ -278,8 +278,8 @@ class LiveMonitor:
         return {"score": closedness, "label": "closed" if closedness >= 0.5 else "open", "ratio": eye.ratio}
 
     def _mouth(self, mouth):
-        _, confidence, cnn_open = self.yawn_model.predict(mouth.crop)
-        if confidence < self.settings["min_cnn_confidence"]:
+        label, confidence, cnn_open = self.yawn_model.predict(mouth.crop)
+        if label == "blocked" or confidence < self.settings["min_cnn_confidence"]:
             return None
         mar = self.config["mar"]
         if cnn_open >= 0.5 and mouth.ratio < mar["closed_threshold"]:

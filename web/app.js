@@ -348,7 +348,7 @@ async function predictCrops(model, sourceCanvas, crops, classNames, positiveClas
 async function predictRegions(regions, eyeModel, yawnModel) {
   const [[left, right], [mouth]] = await Promise.all([
     predictCrops(eyeModel, glareCleanCanvas, [regions.left?.crop, regions.right?.crop], CONFIG.eyeClassNames, "eyes_closed", true, CONFIG.eyeUnreadable),
-    predictCrops(yawnModel, glareCleanCanvas, [regions.mouth?.crop], CONFIG.yawnClassNames, "yawn"),
+    predictCrops(yawnModel, glareCleanCanvas, [regions.mouth?.crop], CONFIG.yawnClassNames, "yawn", false, CONFIG.yawnUnreadable),
   ]);
   return { left, right, mouth };
 }
@@ -549,8 +549,8 @@ function drawEye(side, box, prediction, ear, earCfg, landmarks, smoother) {
 }
 
 function drawMouth(prediction, mar, landmarks) {
-  const { confidence: cnnConfidence, positiveProbability: cnnOpenness } = prediction;
-  if (cnnConfidence < CONFIG.live.minCnnConfidence) return null;
+  const { label: cnnLabel, confidence: cnnConfidence, positiveProbability: cnnOpenness } = prediction;
+  if (cnnLabel === "blocked" || cnnConfidence < CONFIG.live.minCnnConfidence) return null;
   if (cnnOpenness >= 0.5 && mar < CONFIG.mar.closedThreshold) return null;
 
   const marOpenness = linearScore(mar, CONFIG.mar.closedThreshold, CONFIG.mar.openThreshold);
