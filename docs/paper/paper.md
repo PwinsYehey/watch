@@ -2,7 +2,7 @@
 % Real-time alertness monitoring from the eyes, mouth, head and posture
 %% Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo
 
-> **Abstract.** Drowsiness at the controls of a vehicle or aircraft shows in the eyes, mouth, head and posture well before control is lost, yet camera-based monitors usually assume a visible face and a capable computer. This paper presents WATCH, a real-time alertness monitor that runs on a Raspberry Pi 4. Two small convolutional networks classify eye and mouth crops, and each has a third class, *blocked*, for crops it cannot read. Their outputs are combined with face-landmark geometry, head pose and upper-body posture, calibrated to each user, and escalated over time from warning to critical. When a visor or mask hides the face, the monitor relies on posture and asks the user to check in. Trained on four public datasets and tested on people not seen in training, the eye and yawn models reach 96.5% and 95.0% accuracy. On photos of ten motorcycle riders in helmets, closed-eye readings rose from 3.7% in alert sessions to 38.2% in drowsy ones. The full monitor runs at 4 to 6 frames per second on the Pi.
+> **Abstract.** Drowsiness at the controls of a vehicle or aircraft shows in the eyes, mouth, head and posture well before control is lost, yet camera-based monitors usually assume a visible face and a capable computer. This paper presents WATCH, a real-time alertness monitor that runs on a Raspberry Pi 4. Two small convolutional networks classify eye and mouth crops, and each has a third class, *blocked*, for crops it cannot read. Their outputs are combined with face-landmark geometry, head pose and upper-body posture, calibrated to each user, and escalated over time from warning to critical. When a visor or mask hides the face, the monitor relies on posture and asks the user to check in. Trained on four public datasets and tested on people not seen in training, the eye and yawn models reach 96.5% and 95.0% accuracy. On photos of ten motorcycle riders in helmets, closed-eye readings rose from 3.7% in alert sessions to 38.2% in drowsy ones. The full monitor runs at 10 to 15 frames per second on the Pi.
 
 > **Keywords:** drowsiness detection, driver and pilot monitoring, eye state classification, yawn detection, occlusion, embedded systems, Raspberry Pi.
 
@@ -270,7 +270,7 @@ The embedded monitor runs on a Raspberry Pi 4 Model B with 8 GB of memory, a 32 
 | Link to the laptop | Wi-Fi or Ethernet, port 8766 |
 Table: Table 6. Hardware of the embedded monitor.
 
-The developer measured about 4 to 6 frames per second in the default *both* mode with a face in view, and about 8 to 10 in *body* mode, which skips the face models. Because the signs of Table 5 are timed in seconds, the alert logic holds at these rates, but eye closures shorter than a few frames can be missed. Pose tracking on every frame overloaded the Pi until it froze, so it runs every third frame, or every second frame in body mode. The Pi still runs the Keras models; switching it to the exported TFLite files should be faster but has not yet been done.
+The complete monitor runs at about 10 to 15 frames per second on the Pi. The signs of Table 5 are timed in seconds, so a sign lasting 1.5 s spans 15 to 22 frames, which is enough for the alert logic. Pose tracking on every frame overloaded the Pi until it froze, so it runs every third frame, or every second frame in body mode. The Pi still runs the Keras models; switching it to the exported TFLite files should be faster but has not yet been done.
 
 ![Figure 14. The Raspberry Pi setup (left) and a session report exported on the Pi (right).](docs/paper/figures/pi_placeholder.png){12.5}
 
@@ -309,7 +309,7 @@ The eye model reads 96.3% of closed eyes and 97.0% of open eyes correctly, and m
 
 ## 9.2 Speed
 
-On the development laptop with an RTX 4050 GPU, one prediction took 11.5 ± 2.0 ms for the eye model and 11.0 ± 1.7 ms for the yawn model, averaged over 100 runs. These times cover the networks alone. On the Raspberry Pi the complete monitor, including face and body tracking, ran at 4 to 6 frames per second in *both* mode and 8 to 10 in *body* mode (Section 8.2).
+On the development laptop with an RTX 4050 GPU, one prediction took 11.5 ± 2.0 ms for the eye model and 11.0 ± 1.7 ms for the yawn model, averaged over 100 runs. These times cover the networks alone. On the Raspberry Pi the complete monitor, including face and body tracking, ran at about 10 to 15 frames per second (Section 8.2).
 
 ## 9.3 Motorcycle helmet photos
 
@@ -341,7 +341,7 @@ The mouth results are mixed. Helmets and face covers hide the mouth in about hal
 
 **Models.** The yawn model misses about one yawn in six, and some covers fool it: a neck gaiter and the vents in a chin bar were read as yawns. Fine-tuning on device recordings teaches only open and closed eyes, so repeated fine-tuning may weaken the *blocked* class.
 
-**On the device.** The body-language limits are starting values that still need tuning with people in real helmets and seats, and a real nod under a mask has not yet been confirmed to raise an alert. In *both* mode the Pi runs at 4 to 6 frames per second, so very short eye closures can be missed. The face is often lost at side angles, and the body tracker needs the head and both shoulders in view. Reading eyes through a tinted visor with the NoIR camera, use in full darkness, and the infrared lights have not yet been tested. The browser page has no login, so it should only be used on a trusted network.
+**On the device.** The body-language limits are starting values that still need tuning with people in real helmets and seats, and a real nod under a mask has not yet been confirmed to raise an alert. At 10 to 15 frames per second on the Pi, blinks shorter than about 0.1 s can fall between frames. The face is often lost at side angles, and the body tracker needs the head and both shoulders in view. Reading eyes through a tinted visor with the NoIR camera, use in full darkness, and the infrared lights have not yet been tested. The browser page has no login, so it should only be used on a trusted network.
 
 ## 10.2 Future work
 
@@ -349,7 +349,7 @@ The most important next step is a study with pilots or riders wearing their own 
 
 # 11. Conclusion
 
-WATCH monitors alertness from a single camera by combining two small networks with face-landmark geometry, head pose and upper-body posture, calibrated to each user and escalated over time from warning to critical. A *blocked* class lets each network say when it cannot see, instead of guessing, and the monitor falls back on posture and check-ins when a visor or mask hides the face. On people not seen in training, the eye model classified 96.5% of crops correctly and the yawn model 95.0%. On photos of motorcycle riders in helmets, closed-eye readings rose from 3.7% in alert sessions to 38.2% in drowsy ones. The whole system runs on a Raspberry Pi 4 at 4 to 6 frames per second. The main open steps are a study on continuous video of pilots or riders, tuning of the body limits, and a yawn model that is not fooled by face covers.
+WATCH monitors alertness from a single camera by combining two small networks with face-landmark geometry, head pose and upper-body posture, calibrated to each user and escalated over time from warning to critical. A *blocked* class lets each network say when it cannot see, instead of guessing, and the monitor falls back on posture and check-ins when a visor or mask hides the face. On people not seen in training, the eye model classified 96.5% of crops correctly and the yawn model 95.0%. On photos of motorcycle riders in helmets, closed-eye readings rose from 3.7% in alert sessions to 38.2% in drowsy ones. The whole system runs on a Raspberry Pi 4 at 10 to 15 frames per second. The main open steps are a study on continuous video of pilots or riders, tuning of the body limits, and a yawn model that is not fooled by face covers.
 
 \newpage
 
