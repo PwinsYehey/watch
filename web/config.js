@@ -77,6 +77,8 @@ const CONFIG = {
       "mouth": null,
       "head": 4.0,
       "body": 4.0,
+      "nodding": null,
+      "still": 30.0,
       "checkIn": 5.0
     },
     "repeatCount": {
@@ -84,6 +86,8 @@ const CONFIG = {
       "mouth": 3,
       "head": 2,
       "body": 2,
+      "nodding": 2,
+      "still": 2,
       "checkIn": 2
     }
   },
@@ -92,9 +96,17 @@ const CONFIG = {
     "minVisibility": 0.5,
     "dropLimit": 0.1,
     "leanLimitDeg": 10.0,
-    "headDropLimit": 0.25
+    "headDropLimit": 0.25,
+    "forwardLimit": 0.2,
+    "nodDrop": 0.12,
+    "nodMaxSec": 2.5,
+    "nodsWindowSec": 60.0,
+    "nodsLimit": 3,
+    "stillWindowSec": 45.0,
+    "stillLimit": 0.05
   },
   "live": {
+    "mode": "body",
     "minCnnConfidence": 0.65,
     "eyeDecision": "cnn",
     "earGlareTolerance": 0.15,

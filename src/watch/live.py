@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from watch import dashboard as ui
-from watch.alertness import AlertnessMonitor, CheckInMonitor, EscalationMonitor, RollingMedian, head_droop
+from watch.alertness import AlertnessMonitor, CheckInMonitor, EscalationMonitor, NodCounter, RollingMedian, StillnessMonitor, head_droop
 from watch.body import BodyPose, BodyTracker, body_slump
 from watch.camera import open_camera
 from watch.config import load_config
@@ -147,14 +147,17 @@ class LiveMonitor:
         config = load_config()
         self.config = config
         self.settings = config["live"]
-        self.eye_model, self.yawn_model = Classifier("eye"), Classifier("yawn")
+        # In body mode, such as for helmet wearers, the face is never read, so its models are not loaded.
+        self.body_only = self.settings.get("mode") == "body"
+        self.eye_model, self.yawn_model = (None, None) if self.body_only else (Classifier("eye"), Classifier("yawn"))
         self.ear, self.head = config["ear"], config["head_pose"]
         self._camera = camera
         self.capture = open_camera(camera)
         if not self.capture.isOpened():
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
-        self.tracker = FaceTracker(lift_contrast=camera == "pi")
-        self.body_tracker, self.body_base = BodyTracker(config["body"]), None
+        self.tracker = None if self.body_only else FaceTracker(lift_contrast=camera == "pi")
+        body_settings = {**config["body"], "every_n_frames": 1} if self.body_only else config["body"]
+        self.body_tracker, self.body_base = BodyTracker(body_settings), None
         self.alarm = Alarm(self.settings.get("buzzer_gpio"))
         self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active, allow_shutdown)
         self.view = ui.DashboardView()
@@ -173,6 +176,9 @@ class LiveMonitor:
         self.monitors = {key: AlertnessMonitor(**self.config[section]) for key, section in (("eyes", "alertness"), ("mouth", "yawn"), ("head", "nod"), ("body", "slump"))}
         self.escalation = EscalationMonitor(**self.config["escalation"])
         self.check_in = CheckInMonitor(**self.config["check_in"])
+        body = self.config["body"]
+        self.nods = NodCounter(body["nod_drop"], body["nod_max_sec"], body["nods_window_sec"], body["nods_limit"])
+        self.stillness = StillnessMonitor(body["still_window_sec"], body["still_limit"])
         self._level = 0
 
     def _read(self):
@@ -229,7 +235,7 @@ class LiveMonitor:
             if frame is None:
                 frame = self._camera_lost()
                 start = time.time()
-            regions = self.tracker.extract(remove_glare(frame))
+            regions = self.tracker.extract(remove_glare(frame)) if self.tracker else None
             self.session.add(time.time(), "Calibrating")
             if pose := self.body_tracker.update(frame):
                 poses.append(pose)
@@ -239,15 +245,17 @@ class LiveMonitor:
                     pitches.append(regions.pitch)
                     rolls.append(regions.roll)
             name, color = ui.LEVELS["calibrating"]
-            level = ui.Level(name, color, "look at the camera normally", f"{remaining:.1f}s left")
+            level = ui.Level(name, color, "sit upright normally" if self.body_only else "look at the camera normally", f"{remaining:.1f}s left")
             view = self.view.render(frame, level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[])
             self._handle_key(self.display.show(view, 1))
 
         self.ear, self.head = self.config["ear"], self.config["head_pose"]
         thresholds = ear_thresholds(ears, settings)
-        self.calibrated = thresholds is not None
+        self.calibrated = thresholds is not None or (self.body_only and len(poses) >= 5)
         if thresholds:
             self.ear = thresholds
+        elif self.body_only:
+            print("Calibration measured the sitting posture." if len(poses) >= 5 else "Calibration saw no shoulders, so body alerts wait for the next calibration.")
         elif len(ears) >= 10:
             print("Calibration saw no clearly open eyes, such as behind sunglasses, so the default eye thresholds stay.")
         else:
@@ -287,18 +295,19 @@ class LiveMonitor:
         openness = max(cnn_open, linear_score(mouth.ratio, mar["closed_threshold"], mar["open_threshold"]))
         return {"score": openness, "label": "yawn" if openness >= 0.5 else "no yawn", "ratio": mouth.ratio}
 
-    @staticmethod
-    def _idle_state(regions, cues):
+    def _idle_state(self, regions, cues):
+        if self.body_only:
+            return "no_person" if not cues.get("body") else 0
         return "face_covered" if regions is None and cues.get("body") else "no_face"
 
     def _body(self, pose):
-        """Shoulder and head posture against calibration; it raises alerts only while the face cannot be read."""
+        """Shoulder and head posture against calibration; it raises alerts in body mode, or while the face cannot be read."""
         if pose is None:
             return None
         if self.body_base is None:
-            return {"label": "upright", "score": 0.0, "drop": None, "lean": None, "head_drop": None, "pose": pose}
-        score, drop, lean, head_drop = body_slump(pose, self.body_base, self.config["body"])
-        return {"label": "slumped" if score >= 1.0 else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "pose": pose}
+            return {"label": "upright", "score": 0.0, "drop": None, "lean": None, "head_drop": None, "forward": None, "pose": pose}
+        score, drop, lean, head_drop, forward = body_slump(pose, self.body_base, self.config["body"])
+        return {"label": "slumped" if score >= 1.0 else "upright", "score": score, "drop": drop, "lean": lean, "head_drop": head_drop, "forward": forward, "pose": pose}
 
     def _head(self, pitch, roll):
         if pitch is None:
@@ -354,11 +363,14 @@ class LiveMonitor:
 
     def _dashboard(self, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
         """The dashboard contents, mirroring updateDashboard and showCalibration in web/app.js."""
-        name, color = ui.LEVELS[self._idle_state(regions, cues) if regions is None and escalation.level == 0 else escalation.level]
+        idle = self._idle_state(regions, cues)
+        name, color = ui.LEVELS[idle if regions is None and escalation.level == 0 and idle else escalation.level]
         timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
         level = ui.Level(name, color, escalation.reason, timer)
+        if self.body_only:
+            return (level, *self._body_dashboard(cues, statuses, fps, brightness))
 
-        eyes = [cues[side] for side in ("left", "right") if cues.get(side)]
+        eyes =[cues[side] for side in ("left", "right") if cues.get(side)]
         mouth, head = cues.get("mouth"), cues.get("head")
         signs = []
         for label, key, state, concerning in (
@@ -411,6 +423,54 @@ class LiveMonitor:
         readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
         return level, signs, checks, calibration, readings
 
+    def _body_dashboard(self, cues, statuses, fps, brightness):
+        """Signs, checks, calibration and readings when body language alone decides."""
+        body, settings = cues.get("body"), self.config["body"]
+
+        def sign(label, key, state, concerning, timer=""):
+            if not body or statuses[key].state == "no_face":
+                return ui.Row(ui.GRAY, label, "not visible", ui.MUTED, timer)
+            dot = ui.RED if statuses[key].state == "not_alert" else ui.YELLOW if concerning else ui.GREEN
+            return ui.Row(dot, label, state, dot, timer)
+
+        nods, spread = self.nods.count, self.stillness.spread
+        signs = [
+            sign("Posture", "body", body["label"] if body else "", bool(body) and body["label"] == "slumped", f"{statuses['body'].closed_duration:.1f}s"),
+            sign("Nodding", "nodding", f"{nods} of {settings['nods_limit']}", nods > 0),
+            sign("Movement", "still", "measuring" if spread is None else "still" if spread < settings["still_limit"] else "moving", spread is not None and spread < settings["still_limit"], f"{statuses['still'].closed_duration:.0f}s"),
+        ]
+        dark = brightness < self.settings["low_light_mean"]
+        checks = [
+            ui.Row(ui.GREEN if body else ui.RED, "Person", "in view" if body else "shoulders not seen"),
+            ui.Row(ui.GREEN if body and body["pose"].head is not None else ui.YELLOW, "Head", "tracked" if body and body["pose"].head is not None else "not seen"),
+            ui.Row(ui.YELLOW if dark else ui.GREEN, "Lighting", "low" if dark else "good"),
+            ui.Row(ui.GREEN if fps >= 10 else ui.YELLOW, "FPS", f"{fps:.0f}"),
+            ui.Row(ui.GREEN, "Mode", "body language"),
+        ]
+        for row in checks:
+            row.value_color = row.color
+        calibration = [
+            ui.Row(ui.GREEN if self.body_base else ui.YELLOW, "Posture", "measured" if self.body_base else "not seen", ui.GREEN if self.body_base else ui.YELLOW),
+            ui.Row(None, "Shoulder drop", f"≥ {settings['drop_limit'] * 100:.0f}%"),
+            ui.Row(None, "Shoulder lean", f"≥ {settings['lean_limit_deg']:.0f}°"),
+            ui.Row(None, "Head drop", f"≥ {settings['head_drop_limit'] * 100:.0f}%"),
+            ui.Row(None, "Lean forward", f"≥ {settings['forward_limit'] * 100:.0f}%"),
+        ]
+
+        def reading(label, key, limit, unit="%", scale=100):
+            value = body.get(key) if body else None
+            text = "-" if value is None else f"{value * scale:.0f}{unit}" if unit == "%" else f"{value:.1f}{unit}"
+            return ui.Row(None, label, text, ui.MUTED if value is None else ui.RED if value >= limit else ui.TEXT)
+
+        readings = [
+            reading("Shoulder drop", "drop", settings["drop_limit"]),
+            reading("Shoulder lean", "lean", settings["lean_limit_deg"], "°"),
+            reading("Head drop", "head_drop", settings["head_drop_limit"]),
+            reading("Lean forward", "forward", settings["forward_limit"]),
+            ui.Row(None, "Movement", "-" if spread is None else f"{spread * 100:.0f}%", ui.MUTED if spread is None else ui.RED if spread < settings["still_limit"] else ui.TEXT),
+        ]
+        return signs, checks, calibration, readings
+
     def _sharpness_row(self, sharpness):
         if sharpness is None:
             return ui.Row(ui.GRAY, "Sharpness", "-")
@@ -457,7 +517,7 @@ class LiveMonitor:
                     no_face_since, glare_box = None, None
                     continue
                 # Only glare on the face matters, so skip bright spots elsewhere such as windows.
-                regions = self.tracker.extract(remove_glare(frame, glare_box))
+                regions = self.tracker.extract(remove_glare(frame, glare_box)) if self.tracker else None
                 glare_box = face_box(regions, frame.shape) if regions else None
                 body = self._body(self.body_tracker.update(frame))
                 if regions is None and body is None:
@@ -490,8 +550,14 @@ class LiveMonitor:
 
                 now = time.time()
                 statuses = {key: self.monitors[key].update(self.smoothers[key].add(score), now) for key, score in scores.items()}
+                # Nodding and stillness come from the body, so like the posture they count only when the face cannot be read.
+                pose_counts = regions is None and body is not None and self.body_base is not None
+                statuses["nodding"] = self.nods.update(body["head_drop"] if pose_counts else None, now)
+                statuses["still"] = self.stillness.update(body["pose"] if pose_counts else None, now)
                 was_asking = self.check_in.asking
-                statuses["check_in"] = self.check_in.update(scores["eyes"] is not None, regions is not None or body is not None, self._answered, now)
+                # The eyes are never read in body mode, so there is nothing to check in about.
+                if not self.body_only:
+                    statuses["check_in"] = self.check_in.update(scores["eyes"] is not None, regions is not None or body is not None, self._answered, now)
                 self._answered = False
                 if self.check_in.asking and not was_asking:
                     threading.Thread(target=self.alarm.beep, args=(0.4,), daemon=True).start()
@@ -506,7 +572,8 @@ class LiveMonitor:
                     self._level = escalation.level
                     self.events.append((time.strftime("%H:%M:%S"), escalation.level, escalation.reason))
                     self.session.event(f"{LEVEL_NAMES[escalation.level]}: {escalation.reason}".rstrip(": "))
-                state = {"no_face": "No face", "face_covered": "Face covered"}[self._idle_state(regions, cues)] if regions is None and escalation.level == 0 else LEVEL_NAMES[escalation.level]
+                idle = self._idle_state(regions, cues)
+                state = {"no_face": "No face", "face_covered": "Face covered", "no_person": "No person"}[idle] if regions is None and escalation.level == 0 and idle else LEVEL_NAMES[escalation.level]
                 self.session.add(now, state, self._readings(cues), self._limits())
 
                 sharpness = face_sharpness(brighten(frame, self.settings["low_light_mean"], self.settings["low_light_target"]), regions.landmarks) if regions else None

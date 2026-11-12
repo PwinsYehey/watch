@@ -95,8 +95,8 @@ yawn:
 escalation:
   window_sec: 30.0
   calm_sec: 5.0
-  persist_sec: {eyes: 3.0, mouth: null, head: 4.0, body: 4.0, check_in: 5.0}
-  repeat_count: {eyes: 2, mouth: 3, head: 2, body: 2, check_in: 2}
+  persist_sec: {eyes: 3.0, mouth: null, head: 4.0, body: 4.0, nodding: null, still: 30.0, check_in: 5.0}
+  repeat_count: {eyes: 2, mouth: 3, head: 2, body: 2, nodding: 2, still: 2, check_in: 2}
 
 # Head counts as drooped only once it reaches the full drooped angle below.
 nod:
@@ -106,14 +106,27 @@ nod:
   closedness_threshold: 1.0
   dip_grace_period_sec: 0.0
 
-# Upper-body posture from the shoulders, against the calibrated sitting posture. Shown on the dashboard only for now.
+# Upper-body posture from the shoulders and head, against the calibrated sitting posture. It decides alone in body mode,
+# and otherwise counts once the face is covered.
 body:
+  # Pose runs on every frame in body mode, since the face models are not run there.
   every_n_frames: 3
   min_visibility: 0.5
-  # Slumped once the shoulders drop this many shoulder widths, or the shoulder line tilts this far past calibration.
+  # Slumped once the shoulders drop this many shoulder widths, the shoulder line tilts this far past calibration,
+  # the head drops this far toward the shoulders, or the shoulders look this much wider from leaning toward the camera.
   drop_limit: 0.10
   lean_limit_deg: 10.0
   head_drop_limit: 0.25
+  forward_limit: 0.20
+  # A nod is the head dropping nod_drop shoulder widths and coming back up within nod_max_sec; nods_limit nods within
+  # nods_window_sec means nodding off.
+  nod_drop: 0.12
+  nod_max_sec: 2.5
+  nods_window_sec: 60.0
+  nods_limit: 3
+  # No movement means the shoulders and head stayed within still_limit shoulder widths for still_window_sec.
+  still_window_sec: 45.0
+  still_limit: 0.05
 
 check_in:
   blind_sec: 60.0
@@ -151,6 +164,9 @@ calibration:
   roll_drooped_offset: 25.0
 
 live:
+  # body: body language alone decides, for users in helmets whose faces cannot be seen; the face models are not run.
+  # face: eyes, yawning and head from the face, with body posture once the face is covered.
+  mode: body
   min_cnn_confidence: 0.65
   # shape_gate: the CNN counts only when the eye shape also looks closed. cnn: the CNN decides alone,
   # for a model fine-tuned on recordings through tinted lenses, where the eye shape is a guess.
