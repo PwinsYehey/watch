@@ -6,6 +6,8 @@ Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 1
 
 ## Hardware
 
+![The camera connects to the Pi's CAMERA port, the Pi takes 5 V 3 A power, and a laptop browser reaches it over an Ethernet cable or the same Wi-Fi](images/pi-setup.svg)
+
 | Part | Details | What it does |
 |---|---|---|
 | Raspberry Pi 4 Model B | 8 GB RAM | Runs the monitor, the models and the web page. |
@@ -43,6 +45,8 @@ Set with `mode` under `live` in `configs/config.yaml`, then restart the service.
 
 All are measured against the sitting posture taken during calibration, so the camera needs the head and both shoulders in view.
 
+![Upright, slumped, leaning forward, nodding off and not moving](images/body-signs.svg)
+
 | Sign | What it means | Setting under `body` |
 |---|---|---|
 | Slumped | The shoulders drop, the shoulder line tilts, or the head sinks toward the shoulders. A raised arm tilts the shoulders, so the tilt is ignored while an arm is up. | `drop_limit`, `lean_limit_deg`, `head_drop_limit` |
@@ -55,6 +59,8 @@ The head position is the average of whichever head points the body tracker can s
 These limits are starting values. They still need tuning with real tests of people wearing helmets.
 
 ## Quick test (Pi already set up)
+
+![The camera sits about 1 metre away, level with the face, with the head and both shoulders in the picture](images/camera-position.svg)
 
 1. Plug in the Pi's power and wait about a minute. The monitor starts by itself.
 2. Connect to it one of two ways:
