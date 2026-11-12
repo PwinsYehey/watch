@@ -107,7 +107,7 @@ const CONFIG = {
     "stillLimit": 0.05
   },
   "live": {
-    "mode": "body",
+    "mode": "both",
     "minCnnConfidence": 0.65,
     "eyeDecision": "cnn",
     "earGlareTolerance": 0.15,

@@ -149,6 +149,8 @@ class LiveMonitor:
         self.settings = config["live"]
         # In body mode, such as for helmet wearers, the face is never read, so its models are not loaded.
         self.body_only = self.settings.get("mode") == "body"
+        # In both mode the body counts all the time, alongside the face; in face mode only once the face is covered.
+        self.body_always = self.settings.get("mode") in ("body", "both")
         self.eye_model, self.yawn_model = (None, None) if self.body_only else (Classifier("eye"), Classifier("yawn"))
         self.ear, self.head = config["ear"], config["head_pose"]
         self._camera = camera
@@ -503,13 +505,13 @@ class LiveMonitor:
                     "eyes": sum(score * width for score, width in eyes) / eye_weight if eye_weight else None,
                     "mouth": cues["mouth"]["score"] if cues.get("mouth") else None,
                     "head": cues["head"]["score"] if cues.get("head") else None,
-                    "body": body["score"] if regions is None and body and self.body_base else None,
+                    "body": body["score"] if (regions is None or self.body_always) and body and self.body_base else None,
                 }
 
                 now = time.time()
                 statuses = {key: self.monitors[key].update(self.smoothers[key].add(score), now) for key, score in scores.items()}
-                # Nodding and stillness come from the body, so like the posture they count only when the face cannot be read.
-                pose_counts = regions is None and body is not None and self.body_base is not None
+                # Nodding and stillness come from the body, so like the posture they count when the body does.
+                pose_counts = (regions is None or self.body_always) and body is not None and self.body_base is not None
                 statuses["nodding"] = self.nods.update(body["head_drop"] if pose_counts else None, now)
                 statuses["still"] = self.stillness.update(body["pose"] if pose_counts else None, now)
                 was_asking = self.check_in.asking
