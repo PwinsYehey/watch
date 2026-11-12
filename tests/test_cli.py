@@ -4,7 +4,7 @@ from watch.__main__ import build_parser
 from watch.config import load_config
 from watch.export import web_config_js
 
-ACTIONS = ["check", "fetch-data", "prepare-data", "train", "evaluate", "benchmark", "export", "live", "web", "predict", "test", "pipeline"]
+ACTIONS = ["check", "fetch-data", "prepare-data", "train", "record", "finetune", "evaluate", "benchmark", "export", "live", "web", "predict", "test", "pipeline"]
 
 
 @pytest.mark.parametrize("action", ACTIONS)

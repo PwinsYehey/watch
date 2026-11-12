@@ -145,11 +145,16 @@ head_pose:
 calibration:
   duration_sec: 4.0
   closed_offset: 0.10
+  # A resting EAR below this means the eyes were hidden, such as by sunglasses, so the default EAR thresholds stay.
+  min_open_ear: 0.20
   drooped_offset: 25.0
   roll_drooped_offset: 25.0
 
 live:
   min_cnn_confidence: 0.65
+  # shape_gate: the CNN counts only when the eye shape also looks closed. cnn: the CNN decides alone,
+  # for a model fine-tuned on recordings through tinted lenses, where the eye shape is a guess.
+  eye_decision: cnn
   ear_glare_tolerance: 0.15
   low_detail_std: 12.0
   # Frames darker than low_light_mean are brightened to low_light_target.
@@ -160,8 +165,27 @@ live:
   sharp_min: 100.0
   camera_retry_sec: 1.0
   camera_lost_alarm_sec: 3.0
+  # BCM pin of the low-trigger buzzer module (physical pin 7), or null for none.
+  buzzer_gpio: 4
   blurry_below: 40.0
   face_detection_confidence: 0.3
   face_tracking_confidence: 0.5
   recalibrate_gap_sec: 3.0
   smoothing_window: 5
+
+# Labelled eye crops recorded on the device, cued by the buzzer: one beep for open, two for closed, a long beep at the end.
+record:
+  dir: eye/own_eye
+  segments: [[open, 12], [closed, 6], [open, 12], [closed, 6], [open, 12], [closed, 6]]
+  # Frames this soon after a cue are skipped while the eyes react.
+  settle_sec: 1.0
+
+# Fine-tunes the trained eye model on the recordings above. Whole takes are held out for testing.
+finetune:
+  learning_rate: 0.00005
+  epochs: 15
+  early_stopping_patience: 4
+  test_fraction: 0.25
+  # Takes to test on instead of a random test_fraction of them, such as one recorded through sunglasses.
+  test_takes: [yeri_shades3]
+  train_head_only: true

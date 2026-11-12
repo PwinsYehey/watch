@@ -163,13 +163,20 @@ def brighten(image: np.ndarray, dark_below: float, target: float) -> np.ndarray:
     return cv2.LUT(image, (np.linspace(0.0, 1.0, 256) ** gamma * 255.0).astype(np.uint8))
 
 
+def local_contrast(image: np.ndarray) -> np.ndarray:
+    """Lifts detail in locally dark areas such as eyes behind tinted lenses, leaving the frame's overall brightness alone."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray), cv2.COLOR_GRAY2BGR)
+
+
 def is_low_detail(crop: np.ndarray, threshold: float) -> bool:
     return float(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).std()) < threshold
 
 
 class FaceTracker:
-    def __init__(self, static_image_mode: bool = False):
+    def __init__(self, static_image_mode: bool = False, lift_contrast: bool = False):
         settings = load_config()["live"]
+        self._lift_contrast = lift_contrast
         self._mesh = FACE_MESH.FaceMesh(
             static_image_mode=static_image_mode,
             max_num_faces=1,
@@ -216,14 +223,15 @@ class FaceTracker:
 
     def extract(self, image_bgr: np.ndarray) -> FaceRegions | None:
         image_bgr = brighten(image_bgr, *self._low_light)
-        landmarks = self._landmarks(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+        enhanced = local_contrast(image_bgr) if self._lift_contrast else image_bgr
+        landmarks = self._landmarks(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
         if landmarks is None:
             return None
 
         eyes = {
             side: region
             for side, ids, axis, points in (("left", LEFT_EYE_IDS, LEFT_EYE_AXIS, LEFT_EYE_EAR), ("right", RIGHT_EYE_IDS, RIGHT_EYE_AXIS, RIGHT_EYE_EAR))
-            if (region := self._region(image_bgr, landmarks, ids, axis, 0.15, True, points)) is not None
+            if (region := self._region(enhanced, landmarks, ids, axis, 0.15, True, points)) is not None
         }
         mouth = self._region(image_bgr, landmarks, MOUTH_IDS, MOUTH_AXIS, 0.3, False, MOUTH_MAR)
         h, w = image_bgr.shape[:2]

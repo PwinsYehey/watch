@@ -1,0 +1,9 @@
+// polkit rule that lets members of the sudo group power the machine off without a password,
+// which the "Shut down device" button on the live monitor page needs.
+// Install: sudo cp scripts/watch-pi-poweroff.rules /etc/polkit-1/rules.d/50-watch-poweroff.rules
+polkit.addRule(function (action, subject) {
+    var poweroff = ["org.freedesktop.login1.power-off", "org.freedesktop.login1.power-off-multiple-sessions"];
+    if (poweroff.indexOf(action.id) >= 0 && subject.isInGroup("sudo")) {
+        return polkit.Result.YES;
+    }
+});

@@ -65,6 +65,7 @@ const CONFIG = {
   "calibration": {
     "durationSec": 4.0,
     "closedOffset": 0.1,
+    "minOpenEar": 0.2,
     "droopedOffset": 25.0,
     "rollDroopedOffset": 25.0
   },
@@ -95,6 +96,7 @@ const CONFIG = {
   },
   "live": {
     "minCnnConfidence": 0.65,
+    "eyeDecision": "cnn",
     "earGlareTolerance": 0.15,
     "lowDetailStd": 12.0,
     "lowLightMean": 0.3,
@@ -103,6 +105,7 @@ const CONFIG = {
     "sharpMin": 100.0,
     "cameraRetrySec": 1.0,
     "cameraLostAlarmSec": 3.0,
+    "buzzerGpio": 4,
     "blurryBelow": 40.0,
     "faceDetectionConfidence": 0.3,
     "faceTrackingConfidence": 0.5,
