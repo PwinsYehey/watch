@@ -65,3 +65,9 @@ def test_screen_says_face_covered_only_when_a_person_is_still_in_view():
 
 def test_cnn_mode_trusts_the_eye_model_even_when_the_shape_looks_open():
     assert _monitor(eye_decision="cnn")._eye(FRAME, "left", _eye(0.29), ("eyes_closed", 0.9, 0.9))["label"] == "closed"
+
+
+def test_mouth_the_model_calls_blocked_is_unreadable():
+    monitor = _monitor()
+    monitor.yawn_model = SimpleNamespace(predict=lambda crop: ("blocked", 0.95, 0.0))
+    assert monitor._mouth(SimpleNamespace(crop=None, ratio=0.05)) is None

@@ -52,7 +52,7 @@ def build_yawdd_eye(root: Path) -> pd.DataFrame:
 
 
 def build_yawdd(root: Path) -> pd.DataFrame:
-    return _build_labeled_folders("yawdd", root, {"yawn": "yawn", "no_yawn": "no_yawn"})
+    return _build_labeled_folders("yawdd", root, {"yawn": "yawn", "no_yawn": "no_yawn", "blocked": "blocked"})
 
 
 def build_own_eye(root: Path) -> pd.DataFrame:
