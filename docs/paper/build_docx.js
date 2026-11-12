@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  AlignmentType, Bookmark, BorderStyle, Document, HeadingLevel, ImageRun, InternalHyperlink, LevelFormat, Packer, PageBreak, PageNumber,
+  AlignmentType, Bookmark, BorderStyle, Document, HeadingLevel, ImageRun, LevelFormat, Packer, PageBreak, PageNumber,
   Footer, Paragraph, SectionType, ShadingType, Table, TableCell, TableRow, TextRun, WidthType,
 } = require("docx");
 
@@ -155,14 +155,6 @@ function parse(source) {
   return { sections, headings };
 }
 
-function contents(headings) {
-  const entries = headings.map((h) => new Paragraph({
-    style: h.level === 1 ? "Contents1" : "Contents2",
-    children: [new InternalHyperlink({ anchor: h.id, children: inline(h.text) })],
-  }));
-  return [new Paragraph({ style: "ContentsTitle", children: [new TextRun("Contents")] }), ...entries, new Paragraph({ children: [new PageBreak()] })];
-}
-
 const built = parse(fs.readFileSync(path.join(HERE, "paper.md"), "utf8"));
 const footer = () => new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ children: [PageNumber.CURRENT], size: 18 })] })] });
 const heading = (size, before, after) => ({ run: { font: FONT, size, bold: true, color: "000000" }, paragraph: { spacing: { before, after }, keepNext: true, keepLines: true } });
@@ -183,9 +175,6 @@ const doc = new Document({
       { id: "Abstract", name: "Abstract", basedOn: "Normal", next: "Normal", run: { font: FONT, size: 21 }, paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { left: 567, right: 567 }, spacing: { before: 0, after: 160, line: 264 } } },
       { id: "Body", name: "Body Text", basedOn: "Normal", next: "Body", quickFormat: true, run: { font: FONT, size: 20 }, paragraph: { alignment: AlignmentType.JUSTIFIED, spacing: { before: 0, after: 100, line: 252 } } },
       { id: "Caption", name: "Caption", basedOn: "Normal", next: "Body", run: { font: FONT, size: 17, italics: true }, paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 60, after: 160 } } },
-      { id: "ContentsTitle", name: "Contents Title", basedOn: "Normal", next: "Normal", run: { font: FONT, size: 26, bold: true }, paragraph: { spacing: { before: 240, after: 120 } } },
-      { id: "Contents1", name: "Contents 1", basedOn: "Normal", next: "Normal", run: { font: FONT, size: 21, bold: true }, paragraph: { spacing: { before: 60, after: 20 } } },
-      { id: "Contents2", name: "Contents 2", basedOn: "Normal", next: "Normal", run: { font: FONT, size: 21 }, paragraph: { indent: { left: 397 }, spacing: { before: 0, after: 20 } } },
       { id: "Reference", name: "Reference", basedOn: "Normal", next: "Reference", run: { font: FONT, size: 17 }, paragraph: { indent: { left: 397, hanging: 397 }, spacing: { before: 0, after: 80 } } },
     ],
   },
@@ -197,7 +186,7 @@ const doc = new Document({
       column: { count: section.cols, space: GAP, equalWidth: true },
     },
     footers: { default: footer() },
-    children: i === 0 ? [...section.children, ...contents(built.headings)] : section.children,
+    children: section.children,
   })),
 });
 
