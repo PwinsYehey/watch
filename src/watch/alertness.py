@@ -75,7 +75,76 @@ class AlertnessMonitor:
         return sum(score for _, score in self._history) / len(self._history)
 
 
-CUE_LABELS = {"eyes": "eyes closed", "mouth": "yawning", "head": "head drooped", "body": "slumped", "check_in": "no check-in answer"}
+CUE_LABELS = {
+    "eyes": "eyes closed",
+    "mouth": "yawning",
+    "head": "head drooped",
+    "body": "slumped",
+    "nodding": "nodding off",
+    "still": "no movement",
+    "check_in": "no check-in answer",
+}
+
+
+class NodCounter:
+    """Counts nods: the head dropping toward the shoulders and coming back up quickly, the jerk of someone nodding off.
+    A drop that stays down is a slump instead, which the posture check catches."""
+
+    def __init__(self, nod_drop, nod_max_sec, window_sec, nods_limit):
+        self.nod_drop, self.nod_max = nod_drop, nod_max_sec
+        self.window, self.limit = window_sec, nods_limit
+        self._down_since: float | None = None
+        self._nods: deque[float] = deque()
+
+    @property
+    def count(self) -> int:
+        return len(self._nods)
+
+    def update(self, head_drop: float | None, now: float) -> AlertnessStatus:
+        while self._nods and now - self._nods[0] > self.window:
+            self._nods.popleft()
+        if head_drop is None:
+            return AlertnessStatus("no_face", 0.0, 0.0)
+        if head_drop >= self.nod_drop:
+            if self._down_since is None:
+                self._down_since = now
+        elif head_drop < self.nod_drop / 2 and self._down_since is not None:
+            if now - self._down_since <= self.nod_max:
+                self._nods.append(now)
+            self._down_since = None
+        state = "not_alert" if len(self._nods) >= self.limit else "alert"
+        return AlertnessStatus(state, 0.0, len(self._nods) / self.limit)
+
+
+class StillnessMonitor:
+    """Flags a body that has barely moved for a long stretch, a sign of zoning out. Movement is the spread of the shoulder
+    and head positions over the window in shoulder widths, which the small frame-to-frame jitter of the tracker cannot fake."""
+
+    def __init__(self, window_sec, still_limit):
+        self.window, self.limit = window_sec, still_limit
+        self._history: deque[tuple[float, tuple[float, ...]]] = deque()
+        self._still_since: float | None = None
+        self.spread: float | None = None
+
+    def update(self, pose, now: float) -> AlertnessStatus:
+        if pose is None:
+            self._history.clear()
+            self._still_since, self.spread = None, None
+            return AlertnessStatus("no_face", 0.0, 0.0)
+        head = pose.head if pose.head is not None else 0.0
+        self._history.append((now, (pose.center_x / pose.width, pose.center_y / pose.width, head)))
+        while now - self._history[0][0] > self.window:
+            self._history.popleft()
+        if now - self._history[0][0] < self.window * 0.9:
+            self.spread = None
+            return AlertnessStatus("alert", 0.0, 0.0)
+        points = [p for _, p in self._history]
+        self.spread = max(max(axis) - min(axis) for axis in zip(*points))
+        if self.spread >= self.limit:
+            self._still_since = None
+            return AlertnessStatus("alert", 0.0, 0.0)
+        self._still_since = self._still_since or now
+        return AlertnessStatus("not_alert", now - self._still_since, 0.0)
 
 
 class CheckInMonitor:
