@@ -11,7 +11,8 @@ import time
 import cv2
 
 NO_KEY = 0xFF
-KEYS = "qme"
+# Page key to monitor key; "a" answers a check-in, which the desktop window takes as the space bar.
+KEYS = {"q": "q", "m": "m", "e": "e", "a": " "}
 SHUTDOWN_COMMAND = ("systemctl", "poweroff")
 
 PAGE = """<!doctype html>
@@ -39,6 +40,7 @@ PAGE = """<!doctype html>
 <img src="/stream" alt="Live monitor">
 <nav>
   <button id="sound">Enable alarm sound</button>
+  <button data-key="a">I'm awake (Space)</button>
   <button data-key="m">Mute / unmute alarm (M)</button>
   <button data-key="e">Export report (E)</button>
   <button data-key="q">Stop monitor (Q)</button>
@@ -63,11 +65,13 @@ PAGE = """<!doctype html>
     <li><b>WARNING</b>: one sign showed up, such as eyes closed, a yawn or the head dropping. It watches for a while.</li>
     <li><b>CRITICAL</b>: the sign lasted or came back. The buzzer beeps until it clears.</li>
     <li><b>NO FACE DETECTED</b>: nobody is in view. <b>CAMERA LOST</b>: the camera stopped, and the buzzer sounds after 3 seconds.</li>
+    <li><b>CHECK-IN</b>: the eyes have been unreadable for about a minute, such as behind a dark visor. It beeps once; press <b>I'm awake</b> or the space bar within 5 seconds, or it raises the alert. Head and body posture are still watched meanwhile.</li>
   </ul>
 
   <h3>Buttons</h3>
   <ul>
     <li><b>Enable alarm sound</b>: also beeps on this device. Browsers need one click before they can play sound.</li>
+    <li><b>I'm awake (Space)</b>: answers a check-in.</li>
     <li><b>Mute / unmute alarm (M)</b>: silences the buzzer and this page.</li>
     <li><b>Export report (E)</b>: saves a report of the session on the Pi.</li>
     <li><b>Stop monitor (Q)</b>: restarts the monitor, which starts again by itself.</li>
@@ -86,14 +90,22 @@ PAGE = """<!doctype html>
   <ul>
     <li><b>Buzzer</b> on the Pi. It beeps at CRITICAL and goes quiet when the monitor stops. Wiring on the top pin row, counted from the corner hole: VCC on the 1st pin, I/O on the 4th, GND on the 5th.</li>
     <li><b>Sunglasses</b>: the camera is brighter and a contrast filter lifts the eye area, so eyes show through tinted lenses under IR.</li>
-    <li><b>Sunglasses mode</b> (<code>eye_decision: cnn</code>): the eye model decides open or closed, since behind lenses the eye outline is a guess.</li>
+    <li><b>Sunglasses mode</b> (<code>eye_decision: cnn</code>): the eye model decides open or closed, since behind lenses the eye outline is a guess. It is off by default; switch it on after fine-tuning the eye model on your own recordings.</li>
+    <li><b>Hidden eyes</b>: the eye model also recognises eyes it cannot see, such as behind a dark visor, and asks for a check-in instead of guessing.</li>
+    <li><b>Body posture</b>: dropping or tilting shoulders count as a sign too, so it keeps watching when the face is covered.</li>
     <li><b>Training on your own recordings</b> with <code>watch record</code> and <code>watch finetune</code>, run on the Pi over SSH. The buzzer cues each part: one beep open, two beeps closed, a long beep done. See <code>docs/raspberry-pi.md</code>.</li>
   </ul>
 </details>
 <script>
   const send = (key) => fetch("/key/" + key, { method: "POST" });
   document.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => send(button.dataset.key)));
-  document.addEventListener("keydown", (event) => { if ("qme".includes(event.key.toLowerCase())) send(event.key.toLowerCase()); });
+  document.addEventListener("keydown", (event) => {
+    const key = event.key === " " ? "a" : event.key.toLowerCase();
+    if ("qmea".includes(key)) {
+      event.preventDefault();
+      send(key);
+    }
+  });
 
   // Browsers only play sound after a click, so the alarm has to be switched on once.
   let audio = null;
@@ -231,8 +243,8 @@ class BrowserStream:
 
             def do_POST(self):
                 key = self.path.removeprefix("/key/")
-                if self.path.startswith("/key/") and len(key) == 1 and key in KEYS:
-                    stream._keys.put(key)
+                if self.path.startswith("/key/") and key in KEYS:
+                    stream._keys.put(KEYS[key])
                     self._send(204)
                 elif self.path == "/shutdown" and stream._allow_shutdown:
                     result = subprocess.run(SHUTDOWN_COMMAND, capture_output=True, text=True)

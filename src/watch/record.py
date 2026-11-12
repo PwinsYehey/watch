@@ -47,7 +47,7 @@ def record(camera, subject: str, take: str) -> dict[str, int]:
     counts = {label: 0 for label in FOLDERS}
     frames = faces = 0
     try:
-        with FaceTracker(lift_contrast=camera == "pi") as tracker:
+        with FaceTracker() as tracker:
             for label, seconds in settings["segments"]:
                 print(f"{label} for {seconds}s", flush=True)
                 _cue(alarm, label)

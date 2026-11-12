@@ -25,9 +25,9 @@ class PiCamera:
         command = shutil.which("rpicam-vid") or shutil.which("libcamera-vid")
         if command is None:
             return
-        # A camera with no IR filter turns skin pink, so drop the colour, and meter on a wide centre area where the face is.
+        # The camera's own default exposure, metering and colour, with no extra filters.
         self._process = subprocess.Popen(
-            [command, "--nopreview", "--timeout", "0", "--codec", "yuv420", "--width", str(width), "--height", str(height), "--framerate", str(fps), "--metering", "centre", "--ev", "0", "--saturation", "0", "--output", "-"],
+            [command, "--nopreview", "--timeout", "0", "--codec", "yuv420", "--width", str(width), "--height", str(height), "--framerate", str(fps), "--output", "-"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )

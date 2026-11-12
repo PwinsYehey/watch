@@ -17,6 +17,7 @@ LEVELS = {
     2: ("CRITICAL", RED),
     "no_face": ("NO FACE DETECTED", GRAY),
     "face_covered": ("FACE COVERED", (61, 123, 214)),
+    "no_person": ("NO PERSON DETECTED", GRAY),
     "calibrating": ("CALIBRATING", (255, 165, 0)),
     "camera_lost": ("CAMERA LOST", RED),
 }

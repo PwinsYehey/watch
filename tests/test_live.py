@@ -59,8 +59,17 @@ def test_eye_the_model_calls_blocked_is_unreadable():
 
 
 def test_screen_says_face_covered_only_when_a_person_is_still_in_view():
-    assert LiveMonitor._idle_state(None, {"body": {"label": "upright"}}) == "face_covered"
-    assert LiveMonitor._idle_state(None, {"body": None}) == "no_face"
+    monitor = _monitor()
+    monitor.body_only = False
+    assert monitor._idle_state(None, {"body": {"label": "upright"}}) == "face_covered"
+    assert monitor._idle_state(None, {"body": None}) == "no_face"
+
+
+def test_body_mode_shows_normal_with_a_person_and_no_person_without_one():
+    monitor = _monitor()
+    monitor.body_only = True
+    assert monitor._idle_state(None, {"body": {"label": "upright"}}) == 0
+    assert monitor._idle_state(None, {"body": None}) == "no_person"
 
 
 def test_cnn_mode_trusts_the_eye_model_even_when_the_shape_looks_open():

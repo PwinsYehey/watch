@@ -1,4 +1,6 @@
-from watch.alertness import AlertnessMonitor, AlertnessStatus, CheckInMonitor, EscalationMonitor, RollingMedian, head_droop
+from watch.alertness import AlertnessMonitor, AlertnessStatus, CheckInMonitor, EscalationMonitor, NodCounter, RollingMedian, StillnessMonitor, head_droop
+from watch.body import BodyPose
+from watch.config import load_config
 
 
 def _monitor(grace=0.0):
@@ -169,3 +171,36 @@ def test_unanswered_check_in_warns_then_turns_critical():
     assert status.level == 1 and status.reason == "no check-in answer"
     status = monitor.update({"check_in": check_in.update(False, True, False, 70)}, True, 70)
     assert status.level == 2 and status.reason == "no check-in answer too long"
+
+
+def test_quick_head_drops_count_as_nods_but_a_held_drop_does_not():
+    nods = NodCounter(nod_drop=0.12, nod_max_sec=2.5, window_sec=60.0, nods_limit=3)
+    t = 0.0
+    for _ in range(2):
+        nods.update(0.0, t)
+        nods.update(0.2, t + 1)
+        status = nods.update(0.0, t + 2)
+        t += 10
+    assert nods.count == 2 and status.state == "alert"
+    nods.update(0.2, t)
+    nods.update(0.2, t + 5)  # held down too long: a slump, not a nod
+    assert nods.update(0.0, t + 6).state == "alert" and nods.count == 2
+    nods.update(0.2, t + 10)
+    assert nods.update(0.0, t + 11).state == "not_alert"
+    assert nods.update(0.0, t + 200).state == "alert"  # old nods leave the window
+
+
+def test_a_body_that_barely_moves_for_the_whole_window_is_flagged():
+    still = StillnessMonitor(window_sec=45.0, still_limit=0.05)
+    assert still.update(BodyPose(320, 400, 200, 0.0, head=-0.6), 0.0).state == "alert"
+    for t in range(1, 46):
+        status = still.update(BodyPose(320 + (t % 2), 400, 200, 0.0, head=-0.6), float(t))
+    assert status.state == "not_alert"
+    assert still.update(BodyPose(360, 420, 200, 0.0, head=-0.6), 46.0).state == "alert"
+    assert still.update(None, 47.0).state == "no_face" and still.spread is None
+
+
+def test_escalation_knows_the_body_cues():
+    config = load_config()["escalation"]
+    for cue in ("nodding", "still"):
+        assert cue in config["persist_sec"] and cue in config["repeat_count"]
