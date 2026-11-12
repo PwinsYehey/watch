@@ -367,8 +367,6 @@ class LiveMonitor:
         name, color = ui.LEVELS[idle if regions is None and escalation.level == 0 and idle else escalation.level]
         timer = {1: f"watching {escalation.window_left:.0f}s", 2: "alarm on"}.get(escalation.level, "")
         level = ui.Level(name, color, escalation.reason, timer)
-        if self.body_only:
-            return (level, *self._body_dashboard(cues, statuses, fps, brightness))
 
         eyes =[cues[side] for side in ("left", "right") if cues.get(side)]
         mouth, head = cues.get("mouth"), cues.get("head")
@@ -384,8 +382,9 @@ class LiveMonitor:
                 dot = ui.RED if statuses[key].state == "not_alert" else ui.YELLOW if state == concerning else ui.GREEN
             signs.append(ui.Row(dot, label, state, ui.MUTED if dot == ui.GRAY else dot, f"{statuses[key].closed_duration:.1f}s"))
         body = cues.get("body")
-        body_dot = ui.GRAY if not body else ui.YELLOW if body["label"] == "slumped" else ui.GREEN
-        signs.append(ui.Row(body_dot, "Body", body["label"] if body else "not visible", ui.MUTED if body_dot == ui.GRAY else body_dot))
+        body_state = body and next((label for key, label in (("body", "slumped"), ("nodding", "nodding"), ("still", "not moving")) if statuses.get(key) and statuses[key].state == "not_alert"), body["label"])
+        body_dot = ui.GRAY if not body else ui.YELLOW if body_state != "upright" else ui.GREEN
+        signs.append(ui.Row(body_dot, "Body", body_state if body else "not visible", ui.MUTED if body_dot == ui.GRAY else body_dot))
 
         face, dark = regions is not None, brightness < self.settings["low_light_mean"]
         checks = [
@@ -422,54 +421,6 @@ class LiveMonitor:
         ]
         readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
         return level, signs, checks, calibration, readings
-
-    def _body_dashboard(self, cues, statuses, fps, brightness):
-        """Signs, checks, calibration and readings when body language alone decides."""
-        body, settings = cues.get("body"), self.config["body"]
-
-        def sign(label, key, state, concerning, timer=""):
-            if not body or statuses[key].state == "no_face":
-                return ui.Row(ui.GRAY, label, "not visible", ui.MUTED, timer)
-            dot = ui.RED if statuses[key].state == "not_alert" else ui.YELLOW if concerning else ui.GREEN
-            return ui.Row(dot, label, state, dot, timer)
-
-        nods, spread = self.nods.count, self.stillness.spread
-        signs = [
-            sign("Posture", "body", body["label"] if body else "", bool(body) and body["label"] == "slumped", f"{statuses['body'].closed_duration:.1f}s"),
-            sign("Nodding", "nodding", f"{nods} of {settings['nods_limit']}", nods > 0),
-            sign("Movement", "still", "measuring" if spread is None else "still" if spread < settings["still_limit"] else "moving", spread is not None and spread < settings["still_limit"], f"{statuses['still'].closed_duration:.0f}s"),
-        ]
-        dark = brightness < self.settings["low_light_mean"]
-        checks = [
-            ui.Row(ui.GREEN if body else ui.RED, "Person", "in view" if body else "shoulders not seen"),
-            ui.Row(ui.GREEN if body and body["pose"].head is not None else ui.YELLOW, "Head", "tracked" if body and body["pose"].head is not None else "not seen"),
-            ui.Row(ui.YELLOW if dark else ui.GREEN, "Lighting", "low" if dark else "good"),
-            ui.Row(ui.GREEN if fps >= 10 else ui.YELLOW, "FPS", f"{fps:.0f}"),
-            ui.Row(ui.GREEN, "Mode", "body language"),
-        ]
-        for row in checks:
-            row.value_color = row.color
-        calibration = [
-            ui.Row(ui.GREEN if self.body_base else ui.YELLOW, "Posture", "measured" if self.body_base else "not seen", ui.GREEN if self.body_base else ui.YELLOW),
-            ui.Row(None, "Shoulder drop", f"≥ {settings['drop_limit'] * 100:.0f}%"),
-            ui.Row(None, "Shoulder lean", f"≥ {settings['lean_limit_deg']:.0f}°"),
-            ui.Row(None, "Head drop", f"≥ {settings['head_drop_limit'] * 100:.0f}%"),
-            ui.Row(None, "Lean forward", f"≥ {settings['forward_limit'] * 100:.0f}%"),
-        ]
-
-        def reading(label, key, limit, unit="%", scale=100):
-            value = body.get(key) if body else None
-            text = "-" if value is None else f"{value * scale:.0f}{unit}" if unit == "%" else f"{value:.1f}{unit}"
-            return ui.Row(None, label, text, ui.MUTED if value is None else ui.RED if value >= limit else ui.TEXT)
-
-        readings = [
-            reading("Shoulder drop", "drop", settings["drop_limit"]),
-            reading("Shoulder lean", "lean", settings["lean_limit_deg"], "°"),
-            reading("Head drop", "head_drop", settings["head_drop_limit"]),
-            reading("Lean forward", "forward", settings["forward_limit"]),
-            ui.Row(None, "Movement", "-" if spread is None else f"{spread * 100:.0f}%", ui.MUTED if spread is None else ui.RED if spread < settings["still_limit"] else ui.TEXT),
-        ]
-        return signs, checks, calibration, readings
 
     def _sharpness_row(self, sharpness):
         if sharpness is None:
