@@ -122,6 +122,7 @@ const CONFIG = {
     "faceDetectionConfidence": 0.3,
     "faceTrackingConfidence": 0.5,
     "recalibrateGapSec": 3.0,
+    "lostResetSec": 5.0,
     "smoothingWindow": 5
   }
 };

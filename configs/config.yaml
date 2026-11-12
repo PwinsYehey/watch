@@ -187,6 +187,8 @@ live:
   face_detection_confidence: 0.3
   face_tracking_confidence: 0.5
   recalibrate_gap_sec: 3.0
+  # An alert held while nobody is in view is cleared after this long, so it cannot stay on with no way to clear it.
+  lost_reset_sec: 5.0
   smoothing_window: 5
 
 # Labelled eye crops recorded on the device, cued by the buzzer: one beep for open, two for closed, a long beep at the end.

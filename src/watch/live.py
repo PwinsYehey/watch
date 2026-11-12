@@ -522,6 +522,13 @@ class LiveMonitor:
                 body = self._body(self.body_tracker.update(frame))
                 if regions is None and body is None:
                     no_face_since = no_face_since or time.time()
+                    # The level is held while nobody is in view, but not forever: an alert nobody can clear by sitting
+                    # back up, such as when the camera is too close to see the shoulders, ends after a short wait.
+                    if self.escalation.level and time.time() - no_face_since >= self.settings["lost_reset_sec"]:
+                        self._reset()
+                        self.alarm.set(False)
+                        self.events.append((time.strftime("%H:%M:%S"), 0, "alert cleared, nobody in view"))
+                        self.session.event("Alert cleared, nobody in view")
                 elif no_face_since is not None:
                     # The user left the camera, so calibrate again for whoever is in front of it now.
                     gap, no_face_since = time.time() - no_face_since, None
