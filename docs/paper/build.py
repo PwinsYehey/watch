@@ -208,7 +208,7 @@ def parse(source: str) -> list:
 
 def page_number(canvas, doc):
     canvas.setFont(SERIF, 9)
-    canvas.drawCentredString(A4[0] / 2, 1.1 * cm, str(doc.page))
+    canvas.drawRightString(A4[0] - MARGIN - 6, 1.1 * cm, str(doc.page))
 
 
 def build(source: Path, output: Path) -> None:
