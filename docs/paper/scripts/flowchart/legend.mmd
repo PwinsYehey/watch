@@ -1,0 +1,30 @@
+flowchart LR
+  classDef term fill:#e8f1fb,stroke:#2a78d6,stroke-width:2px,color:#0b0b0b
+  classDef proc fill:#ffffff,stroke:#52514e,stroke-width:1.5px,color:#0b0b0b
+  classDef dec fill:#fff6e0,stroke:#c98500,stroke-width:1.5px,color:#0b0b0b
+  classDef io fill:#eaf7f0,stroke:#1baf7a,stroke-width:1.5px,color:#0b0b0b
+  classDef store fill:#f1eefb,stroke:#4a3aa7,stroke-width:1.5px,color:#0b0b0b
+  classDef sub fill:#fdecef,stroke:#d55181,stroke-width:1.5px,color:#0b0b0b
+  classDef alert fill:#fde8e8,stroke:#d03b3b,stroke-width:2px,color:#0b0b0b
+  classDef warn fill:#fff3d6,stroke:#c98500,stroke-width:2px,color:#0b0b0b
+  classDef conn fill:#ffffff,stroke:#0b0b0b,stroke-width:1.5px,color:#0b0b0b,font-weight:bold
+  classDef ok fill:#e6f6e6,stroke:#0ca30c,stroke-width:2px,color:#0b0b0b
+  T@{ shape: stadium, label: "Terminator<br/>start / end" }
+  P["Process"]
+  D{"Decision"}
+  I@{ shape: lean-r, label: "Input / output" }
+  F@{ shape: subproc, label: "Predefined<br/>process" }
+  K@{ shape: cyl, label: "Stored data" }
+  M@{ shape: docs, label: "Document(s)" }
+  N@{ shape: sl-rect, label: "Manual input" }
+  Y@{ shape: curv-trap, label: "Display" }
+  A(("A"))
+  B(("B"))
+  T ~~~ P ~~~ D ~~~ I ~~~ F ~~~ K ~~~ M ~~~ N ~~~ Y ~~~ A ~~~ B
+  class T term
+  class P proc
+  class D dec
+  class I io
+  class F sub
+  class K,M store
+  class A,B conn

@@ -1,0 +1,1 @@
+{"theme": "base", "themeVariables": {"fontFamily": "Segoe UI", "fontSize": "14px", "primaryColor": "#ffffff", "primaryBorderColor": "#52514e", "primaryTextColor": "#0b0b0b", "lineColor": "#8a8984", "clusterBkg": "#f7f7f5", "clusterBorder": "#dddcd5", "edgeLabelBackground": "#ffffff", "tertiaryColor": "#f7f7f5"}, "flowchart": {"htmlLabels": true, "curve": "basis"}}

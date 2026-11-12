@@ -14,8 +14,6 @@ from matplotlib import font_manager
 serif_fonts()
 OUT = ROOT / "docs/paper/figures"
 
-flow = cv2.imread(str(ROOT / "docs/architecture-flowchart.png"))
-cv2.imwrite(str(OUT / "flow_offline.png"), flow[258:1352, 30:450])
 
 eye = pd.read_csv(ROOT / "data/splits/eye_manifest.csv")
 yawn = pd.read_csv(ROOT / "data/splits/yawn_manifest.csv")
