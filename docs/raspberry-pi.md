@@ -2,7 +2,7 @@
 
 How to run the live monitor on a Raspberry Pi with a camera module and watch it from a browser on a laptop. The Pi needs no screen.
 
-Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie) and a Camera Module 3 NoIR. In the default **both** mode it runs at about 4 to 6 FPS with a face in view, and about 8 to 10 FPS in **body** mode.
+Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie) and a Camera Module 3 NoIR. The monitor runs at about 10 to 15 FPS.
 
 ## Hardware
 
@@ -306,7 +306,7 @@ Run `./scripts/setup-pi.sh` again only if `pyproject.toml` changed.
 ## Known limits
 
 - **The body language limits are untested starting values.** They need tuning with people wearing helmets in the real seating position.
-- **Both mode is slow on a Pi 4,** about 4 to 6 FPS, because the face and body models run together. Short eye closures can be missed. Body mode is smoother.
+- **About 10 to 15 FPS on a Pi 4.** Blinks shorter than about 0.1 s can fall between frames.
 - **Not finished for a tinted visor.** Eyes were visible through tinted shades on the camera, but the monitor has not been tested reading them through shades or a visor.
 - **Daytime use is the current target.** Working in full darkness has not been tested.
 - **The open-eye change has not been tested on a face yet.** The change in `live.py` passes the unit tests, but no one has confirmed yet that it stops the false alarm while still catching closed eyes.
