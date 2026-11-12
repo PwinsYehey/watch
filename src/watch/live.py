@@ -155,7 +155,7 @@ class LiveMonitor:
         self.capture = open_camera(camera)
         if not self.capture.isOpened():
             raise ConnectionError(f"Could not open camera {camera}, try another --camera index.")
-        self.tracker = None if self.body_only else FaceTracker(lift_contrast=camera == "pi")
+        self.tracker = None if self.body_only else FaceTracker()
         body_settings = {**config["body"], "every_n_frames": 1} if self.body_only else config["body"]
         self.body_tracker, self.body_base = BodyTracker(body_settings), None
         self.alarm = Alarm(self.settings.get("buzzer_gpio"))

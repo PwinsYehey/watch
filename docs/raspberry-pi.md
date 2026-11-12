@@ -74,7 +74,7 @@ Type the Pi's password when asked, then wait for the green light as above.
 
 | File | Change |
 |---|---|
-| `src/watch/camera.py` | New. `--camera pi` reads a Pi camera module through `rpicam-vid`, since OpenCV cannot open it by index. It meters on the centre of the picture, lowers the exposure one step and removes the colour, so a face near the IR LEDs is not washed out or pink. |
+| `src/watch/camera.py` | New. `--camera pi` reads a Pi camera module through `rpicam-vid`, since OpenCV cannot open it by index. It uses the camera's default exposure, metering and colour. |
 | `src/watch/stream.py` | New. `--stream [PORT]` serves the monitor window to a browser as an MJPEG stream, with the keys and alarm sent through the page. |
 | `src/watch/live.py` | Uses the two modules above instead of calling `cv2.VideoCapture`, `cv2.imshow` and `cv2.waitKey` directly. An open eye shape now overrules the eye model unless there is glare, because the model called open eyes closed on this camera's soft IR picture. This applies to every camera. |
 | `src/watch/__main__.py` | Adds `--camera pi`, `--stream [PORT]` and `--allow-shutdown` to the `live` action. |
@@ -211,13 +211,7 @@ Only one program can use the camera at a time, so stop the service before runnin
 
 ## Changing the picture
 
-The exposure and colour settings are in the `rpicam-vid` command in `src/watch/camera.py`. Restart the service after changing them.
-
-| Setting | Now | Effect |
-|---|---|---|
-| `--ev` | `0` | Tuned for a lit room. At `-1` the face behind sunglasses went almost black. In a fully dark room with one IR module the lenses stay black at `0`; `1` showed the eyes but washed out the face and dropped to 5 fps, so the project stays on a lit room. |
-| `--saturation` | `0` | Black and white. In colour, the camera's lack of an IR filter turned the face solid pink and the eyes could not be read. |
-| `--metering` | `centre` | Sets the brightness from a wide area around the centre. `spot` darkened the face whenever it moved off the small centre spot onto the wall behind. |
+The camera runs on its own default exposure, metering and colour, with no extra filters. To change the picture, add `rpicam-vid` options such as `--ev`, `--saturation` or `--metering` to the command in `src/watch/camera.py`, then restart the service. On a NoIR camera the default colour looks pink or purple, which does not matter for body tracking; `--saturation 0` makes it black and white.
 
 ## Training on your own recordings
 
@@ -257,7 +251,7 @@ Run `./scripts/setup-pi.sh` again only if `pyproject.toml` changed.
 | `raspberrypi.local` is not found | The laptop may block mDNS (some managed machines and firewalls do). Find the Pi's address with `hostname -I` on the Pi and use `http://<address>:8766`. |
 | `No cameras available!` or `Could not open camera pi` | The page stays down because the monitor keeps restarting without a camera. Reseat the ribbon at both ends with the Pi powered off. For an IMX219 camera, apply the setting in step 1. |
 | Black video, "NO FACE DETECTED" | The lens is covered or pointing away, or the room is too dark. |
-| The picture is pink or blue | Colour is set by `--saturation` in `src/watch/camera.py`, and `0` removes it. |
+| The picture is pink or purple | Normal for a NoIR camera. Add `--saturation 0` to the command in `src/watch/camera.py` for black and white. |
 | The face is washed out and "Eyes: 0 of 2 readable" | Too much IR on the face. Move back or angle the IR modules. |
 | "Lighting: low, boosted" | Add light on the face. A lamp from the front or a window you are facing works. |
 | "Sharpness: blurry" | Sit 50 to 70 cm back and hold still. If it stays soft, power off and try a very small twist of the lens if it turns easily; some are glued, so do not force it. |
