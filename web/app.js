@@ -375,7 +375,7 @@ function bodyStatus(pose) {
   if (!pose) return null;
   if (!bodyBase) return { label: "upright", score: 0, drop: null, lean: null, headDrop: null };
   const { score, drop, lean, headDrop } = bodySlump(pose, bodyBase, CONFIG.body);
-  return { label: score >= 1 ? "slumped" : "upright", score, drop, lean, headDrop, pose };
+  return { label: score >= 1 ? "slumped" : pose.armRaised ? "arm raised" : "upright", score, drop, lean, headDrop, pose };
 }
 
 // Mirrors the body marker in LiveMonitor._draw: the shoulder line, over a dashed line at the calibrated shoulder height.
@@ -1054,7 +1054,7 @@ async function main() {
       const eyeStatus = eyeMonitor.update(eyeSmoother.add(eyeClosedness), now);
       const yawnStatus = yawnMonitor.update(mouthSmoother.add(mouthOpenness), now);
       const nodStatus = nodMonitor.update(headSmoother.add(headDroop), now);
-      const slumpStatus = slumpMonitor.update(bodySmoother.add(!faceFound && bodyResult && bodyBase ? bodyResult.score : null), now);
+      const slumpStatus = slumpMonitor.update(bodySmoother.add(bodyResult && bodyBase ? bodyResult.score : null), now);
 
       const wasAsking = checkInMonitor.asking;
       const checkInStatus = checkInMonitor.update(eyeClosedness !== null, faceFound || bodyResult !== null, checkInAnswered, now);
