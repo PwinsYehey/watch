@@ -235,13 +235,17 @@ Signs drive a three-level state machine (Figure 10). The first sign raises a *wa
 
 The level is held while the user is out of view, so looking away cannot clear an alert, but it is cleared after 5 s with nobody in view, since no one is left to respond. If the camera disconnects, the dashboard shows CAMERA LOST, the alarm sounds after 3 s, and the monitor recalibrates once the camera returns.
 
+Figure 11 shows the dashboard at both alert levels.
+
+![Figure 11. The live dashboard at WARNING (left) and CRITICAL (right), with the sign that raised each level and its timer.](docs/paper/figures/escalation_placeholder.png){12.5}
+
 ## 7.6 Covered faces and check-ins
 
 WATCH has three modes. In the default *both* mode, the face and body cues count together, so the monitor works with or without a helmet. *Face* mode reads the face first and counts the body only when the face cannot be read. *Body* mode skips the face models entirely, which suits a user whose helmet always hides the face and saves processing on the Pi.
 
-When the face is not found but the shoulders are, the dashboard shows FACE COVERED and monitoring continues on posture, nodding and stillness. Body language cannot tell whether eyes behind a tinted visor are open, though. So when the eyes have been unreadable for 60 s while the user is still in view, the monitor beeps and asks for a check-in: a press of the space bar, or the "I'm awake" button in the browser. No answer within 5 s raises a warning, and 5 s more makes it critical. Each answer and its reaction time are written to the session log. Figure 11 shows both situations.
+When the face is not found but the shoulders are, the dashboard shows FACE COVERED and monitoring continues on posture, nodding and stillness. Body language cannot tell whether eyes behind a tinted visor are open, though. So when the eyes have been unreadable for 60 s while the user is still in view, the monitor beeps and asks for a check-in: a press of the space bar, or the "I'm awake" button in the browser. No answer within 5 s raises a warning, and 5 s more makes it critical. Each answer and its reaction time are written to the session log. Figure 12 shows both situations.
 
-![Figure 11. The live monitor on the Raspberry Pi with a pilot whose face is visible (left) and with a tinted visor and oxygen mask (right).](docs/paper/figures/pilot_placeholder.png){12.5}
+![Figure 12. The live monitor on the Raspberry Pi with a pilot whose face is visible (left) and with a tinted visor and oxygen mask (right).](docs/paper/figures/pilot_placeholder.png){12.5}
 
 # 8. Implementation and Deployment
 
@@ -251,9 +255,9 @@ WATCH is written in Python 3.12 with TensorFlow, MediaPipe and OpenCV. Every ste
 
 ## 8.2 Raspberry Pi
 
-The embedded monitor runs on a Raspberry Pi 4 Model B with 8 GB of memory, a 32 GB microSD card and a Camera Module 3 NoIR (Figure 12, Table 6). The camera has no infrared filter, so it can also see by infrared light. The Pi has no screen. Instead, the monitor streams its window, the video with the dashboard beside it, to a browser on a laptop over Wi-Fi or a direct Ethernet cable. The page has buttons to mute the alarm, export a report, stop the monitor and shut the Pi down. A buzzer on a GPIO pin sounds the alarm, and the page can beep as well. A system service starts the monitor at boot and restarts it if it stops.
+The embedded monitor runs on a Raspberry Pi 4 Model B with 8 GB of memory, a 32 GB microSD card and a Camera Module 3 NoIR (Figure 13, Table 6). The camera has no infrared filter, so it can also see by infrared light. The Pi has no screen. Instead, the monitor streams its window, the video with the dashboard beside it, to a browser on a laptop over Wi-Fi or a direct Ethernet cable. The page has buttons to mute the alarm, export a report, stop the monitor and shut the Pi down. A buzzer on a GPIO pin sounds the alarm, and the page can beep as well. A system service starts the monitor at boot and restarts it if it stops.
 
-![Figure 12. The Raspberry Pi setup. The Pi needs no screen; a laptop on the same network views and controls the monitor.](docs/paper/figures/pi_hardware.png){8}
+![Figure 13. The Raspberry Pi setup. The Pi needs no screen; a laptop on the same network views and controls the monitor.](docs/paper/figures/pi_hardware.png){8}
 
 | Part | Details |
 |---|---|
@@ -268,23 +272,25 @@ Table: Table 6. Hardware of the embedded monitor.
 
 The developer measured about 4 to 6 frames per second in the default *both* mode with a face in view, and about 8 to 10 in *body* mode, which skips the face models. Because the signs of Table 5 are timed in seconds, the alert logic holds at these rates, but eye closures shorter than a few frames can be missed. Pose tracking on every frame overloaded the Pi until it froze, so it runs every third frame, or every second frame in body mode. The Pi still runs the Keras models; switching it to the exported TFLite files should be faster but has not yet been done.
 
-![Figure 13. The Raspberry Pi setup (left) and a session report exported on the Pi (right).](docs/paper/figures/pi_placeholder.png){12.5}
+![Figure 14. The Raspberry Pi setup (left) and a session report exported on the Pi (right).](docs/paper/figures/pi_placeholder.png){12.5}
 
 ## 8.3 Browser demo
 
-The `web` action serves a browser version of the monitor. It runs entirely in the browser with TensorFlow.js and MediaPipe's face and pose landmarkers, so no video leaves the computer. It follows the face flow of Section 7 with the slump sign and the check-in, but not the other body-language signs. It also analyses a single uploaded or pasted photo (Figure 14). Photo analysis reads only the face: body signs are measured against the posture from calibration and over time, which a single photo cannot provide, so posture is tracked only in live camera mode.
+The `web` action serves a browser version of the monitor. It runs entirely in the browser with TensorFlow.js and MediaPipe's face and pose landmarkers, so no video leaves the computer. It follows the face flow of Section 7 with the slump sign and the check-in, but not the other body-language signs. It also analyses a single uploaded or pasted photo (Figure 15). Photo analysis reads only the face: body signs are measured against the posture from calibration and over time, which a single photo cannot provide, so posture is tracked only in live camera mode.
 
-![Figure 14. The browser demo analysing a photo from YawDD. The scanned view marks the eyes, mouth and head with their readings: both eyes open, a yawn, and the head upright. Body posture is not analysed in photo mode.](docs/paper/figures/web_demo.png){14}
+![Figure 15. The browser demo analysing a photo from YawDD. The scanned view marks the eyes, mouth and head with their readings: both eyes open, a yawn, and the head upright. Body posture is not analysed in photo mode.](docs/paper/figures/web_demo.png){14}
 
 ## 8.4 Dashboard and session reports
 
-Beside the video, the dashboard shows the alert level, each sign with its timer, what is being detected, such as how many eyes are readable, the lighting and the sharpness of the face, and the recent level changes. Exporting a session saves two files: a graph of the alert level over time, with periods of no face, a covered face, calibration and a lost camera shaded, and a CSV log of every change with its reason. Check-in answers and their reaction times are part of the log.
+Beside the video, the dashboard shows the alert level, each sign with its timer, what is being detected, such as how many eyes are readable, the lighting and the sharpness of the face, and the recent level changes. Exporting a session saves two files: a graph of the alert level over time, with periods of no face, a covered face, calibration and a lost camera shaded, and a CSV log of every change with its reason. Check-in answers and their reaction times are part of the log. Figure 16 shows the full monitor during a session.
+
+![Figure 16. The live monitor during a session. The video shows the face markers and the shoulder line from the body tracker; the dashboard beside it shows the alert level, each sign with its timer, the body readings and the recent events.](docs/paper/figures/dashboard_placeholder.png){13}
 
 # 9. Results
 
 ## 9.1 Accuracy on unseen people
 
-Both models were tested on the test split of Section 4.3, whose people the models never saw in training, using the decision rule of Section 5.3. Table 7 gives the results and Figure 15 the confusion matrices.
+Both models were tested on the test split of Section 4.3, whose people the models never saw in training, using the decision rule of Section 5.3. Table 7 gives the results and Figure 17 the confusion matrices.
 
 | Measure | Eye model | Yawn model |
 |---|---|---|
@@ -299,7 +305,7 @@ Table: Table 7. Test results on people not seen in training.
 
 The eye model reads 96.3% of closed eyes and 97.0% of open eyes correctly, and marks only 1.2% of visible eyes as *blocked*, so a covered eye rarely hides a real closure. It is strongest on MRL Eye, at 97.4% for closed and 95.6% for open eyes, and weakest on closed eyes in the small, low-resolution CEW patches and on the four-person NTHU-DDD set, at 87 to 89%. The yawn model is the weaker of the two. It misses 17.4% of yawns, reading them as an ordinary mouth, while only 2.3% of non-yawning mouths are taken for a yawn. Its test split holds only nine people, so its figures are less certain than the eye model's.
 
-![Figure 15. Confusion matrices on the test split. Each row shows how the crops of one actual class were classified.](docs/paper/figures/confusion.png){13}
+![Figure 17. Confusion matrices on the test split. Each row shows how the crops of one actual class were classified.](docs/paper/figures/confusion.png){13}
 
 ## 9.2 Speed
 
@@ -319,9 +325,9 @@ The helmet photos of Section 3.3 test WATCH on real riders, with the duplicated 
 | Body pose found | 69.8% | 55.9% |
 Table: Table 8. Readings on the motorcycle helmet photos.
 
-The eye model separates the sessions clearly: closed-eye readings rise from 3.7% when alert to 38.2% when drowsy. Every rider whose face was found in both sessions has more closed-eye readings in the drowsy one, including all seven riders with trusted labels (Figure 16). The face was found in 84 to 85% of photos, but much less often at side angles: never in P10's alert session, and in 46% of P07's drowsy session.
+The eye model separates the sessions clearly: closed-eye readings rise from 3.7% when alert to 38.2% when drowsy. Every rider whose face was found in both sessions has more closed-eye readings in the drowsy one, including all seven riders with trusted labels (Figure 18). The face was found in 84 to 85% of photos, but much less often at side angles: never in P10's alert session, and in 46% of P07's drowsy session.
 
-![Figure 16. Share of eye readings classed closed for each rider. Asterisks mark doubtful labels. P10's face was not found in the alert session.](docs/paper/figures/helmet_closed.png){8}
+![Figure 18. Share of eye readings classed closed for each rider. Asterisks mark doubtful labels. P10's face was not found in the alert session.](docs/paper/figures/helmet_closed.png){8}
 
 The mouth results are mixed. Helmets and face covers hide the mouth in about half the photos, and the *blocked* class catches most of them. Two covers fool it, however: P02's neck gaiter is read as a yawn in 90% of alert photos and the vents in P05's chin bar in all of them. Because such a cover stays in place, a live session would likely see these readings persist and raise a false yawn warning. Body pose was found in 70% of alert and 56% of drowsy photos, but in only 4 to 23% for P03, P04 and P11, whose photos are close-up and leave the shoulders out of frame.
 
