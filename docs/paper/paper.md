@@ -272,9 +272,9 @@ The developer measured about 4 to 6 frames per second in the default *both* mode
 
 ## 8.3 Browser demo
 
-The `web` action serves a browser version of the monitor. It runs entirely in the browser with TensorFlow.js and MediaPipe's face and pose landmarkers, so no video leaves the computer. It follows the face flow of Section 7 with the slump sign and the check-in, but not the other body-language signs. It also analyses a single uploaded or pasted photo (Figure 14).
+The `web` action serves a browser version of the monitor. It runs entirely in the browser with TensorFlow.js and MediaPipe's face and pose landmarkers, so no video leaves the computer. It follows the face flow of Section 7 with the slump sign and the check-in, but not the other body-language signs. It also analyses a single uploaded or pasted photo (Figure 14). Photo analysis reads only the face: body signs are measured against the posture from calibration and over time, which a single photo cannot provide, so posture is tracked only in live camera mode.
 
-![Figure 14. The browser demo analysing a photo from YawDD. The scanned view marks the eyes, mouth and head with their readings: both eyes open, a yawn, and the head upright.](docs/paper/figures/web_demo.png){14}
+![Figure 14. The browser demo analysing a photo from YawDD. The scanned view marks the eyes, mouth and head with their readings: both eyes open, a yawn, and the head upright. Body posture is not analysed in photo mode.](docs/paper/figures/web_demo.png){14}
 
 ## 8.4 Dashboard and session reports
 
