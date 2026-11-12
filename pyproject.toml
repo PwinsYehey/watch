@@ -27,6 +27,7 @@ train = [
     "unrar-cffi>=0.2",
 ]
 dev = ["pytest>=8.0", "pandas>=2.2"]
+paper = ["reportlab>=4.0", "pypdf>=4.0", "matplotlib>=3.8", "pandas>=2.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
