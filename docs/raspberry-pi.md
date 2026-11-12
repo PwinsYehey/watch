@@ -31,6 +31,59 @@ IR LED boards bought for night vision cameras get no power when screwed onto thi
 
 The IR modules light the face without bothering the person, and a camera with no IR filter can see that light. Eyes were visible through a pair of tinted shades this way, but the monitor has not yet been tested reading eyes through shades or a tinted visor. See [Known limits](#known-limits).
 
+## How it works
+
+What the monitor does from power-on to the alarm, every frame, in the default `both` mode. In `body` mode the face step is skipped.
+
+```mermaid
+flowchart TD
+  BOOT([Pi powers on]) --> SVC[watch.service starts the monitor]
+  SVC --> CAM{Camera found?}
+  CAM -- No --> RETRY[Exit and restart after 5 s] --> SVC
+  CAM -- Yes --> CAL[Calibrate for 4 s<br/>resting eyes, head angle and sitting posture]
+  CAL --> FRAME[Read a camera frame]
+
+  FRAME --> FACEQ{Mode uses the face?<br/>both or face}
+  FACEQ -- Yes --> FACE[Face Mesh<br/>eyes, mouth and head angle]
+  FACE --> FSIGNS[Face signs<br/>eyes closed, yawning, head drooped]
+  FACEQ -- No --> BODY
+  FSIGNS --> BODY
+
+  BODY[Body tracker<br/>shoulders, head and arms] --> BSIGNS[Body signs vs calibrated posture<br/>slumped, leaning forward, nodding off, not moving]
+
+  BSIGNS --> SEEN{Anyone in view?}
+  SEEN -- No --> GONE{Gone 5 s or more?}
+  GONE -- Yes --> CLEAR[Clear the alert, alarm off<br/>recalibrate when someone returns]
+  GONE -- No --> HOLD[Hold the current level]
+  SEEN -- Yes --> LEVEL{Signs now?}
+
+  LEVEL -- None --> NORMAL[NORMAL]
+  LEVEL -- One sign --> WARN[WARNING<br/>watch for 30 s]
+  LEVEL -- Repeats, two signs<br/>or lasts too long --> CRIT[CRITICAL]
+
+  CRIT --> ALARM[Buzzer on the Pi<br/>and beep on the page]
+  NORMAL --> PAGE
+  WARN --> PAGE
+  ALARM --> PAGE
+  HOLD --> PAGE
+  CLEAR --> PAGE
+
+  PAGE[Web page at raspberrypi.local:8766<br/>video, dashboard, recent events] --> KEYS{Button pressed?}
+  KEYS -- None --> FRAME
+  KEYS -- Mute or Export --> FRAME
+  KEYS -- Stop --> SVC
+  KEYS -- Shut down --> OFF([Pi powers off])
+
+  classDef ok fill:#e6f6e6,stroke:#2e7d32,color:#111
+  classDef warn fill:#fff3d6,stroke:#c98500,color:#111
+  classDef bad fill:#fde8e8,stroke:#c62828,color:#111
+  class NORMAL ok
+  class WARN warn
+  class CRIT,ALARM bad
+```
+
+The full flow, including model training and photo analysis, is in [architecture-flowchart.png](architecture-flowchart.png).
+
 ## Detection modes
 
 Set with `mode` under `live` in `configs/config.yaml`, then restart the service.
