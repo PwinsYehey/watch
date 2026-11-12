@@ -93,6 +93,7 @@ const CONFIG = {
   },
   "body": {
     "everyNFrames": 3,
+    "bodyModeEveryNFrames": 2,
     "minVisibility": 0.5,
     "dropLimit": 0.1,
     "leanLimitDeg": 10.0,

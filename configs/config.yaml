@@ -109,8 +109,10 @@ nod:
 # Upper-body posture from the shoulders and head, against the calibrated sitting posture. It decides alone in body mode,
 # and otherwise counts once the face is covered.
 body:
-  # Pose runs on every frame in body mode, since the face models are not run there.
+  # Pose runs every every_n_frames frames, or every body_mode_every_n_frames in body mode, where the face models are
+  # not run. Every frame overloaded a Pi 4 until it froze.
   every_n_frames: 3
+  body_mode_every_n_frames: 2
   min_visibility: 0.5
   # Slumped once the shoulders drop this many shoulder widths, the shoulder line tilts this far past calibration,
   # the head drops this far toward the shoulders, or the shoulders look this much wider from leaning toward the camera.
