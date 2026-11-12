@@ -81,7 +81,7 @@ The second is synthetic. Thirty clear YawDD videos of 11 drivers were overlaid w
 
 ## 3.4 Device recordings
 
-Public datasets differ from the deployed setting in camera, lighting and angle. To close this gap, WATCH includes a `record` command that collects labelled eye images on the device itself. The buzzer cues the user: one beep to open the eyes, two to close them. A session alternates 12 s open and 6 s closed, three times, so the user never has to look at a screen. The first second after each cue is skipped while the eyes respond. Each eye is cropped and saved with its subject and take name, so complete takes, such as one recorded through sunglasses, can be held out for testing. In total, ==[number]== takes were recorded from ==[number]== people, giving ==[number]== eye crops. These recordings are used only to fine-tune the eye model (Section 6).
+Public datasets differ from the deployed setting in camera, lighting and angle. To close this gap, WATCH includes a `record` command that collects labelled eye images on the device itself. The buzzer cues the user: one beep to open the eyes, two to close them. A session alternates 12 s open and 6 s closed, three times, so the user never has to look at a screen. The first second after each cue is skipped while the eyes respond. Each eye is cropped and saved with its subject and take name, so complete takes, such as one recorded through sunglasses, can be held out for testing. These recordings are used only to fine-tune the eye model (Section 6).
 
 # 4. Data Preparation
 
