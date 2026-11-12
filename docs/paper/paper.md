@@ -272,7 +272,9 @@ The developer measured about 4 to 6 frames per second in the default *both* mode
 
 ## 8.3 Browser demo
 
-The `web` action serves a browser version of the monitor. It runs entirely in the browser with TensorFlow.js and MediaPipe's face and pose landmarkers, so no video leaves the computer. It follows the face flow of Section 7 with the slump sign and the check-in, but not the other body-language signs. It also analyses a single uploaded or pasted photo.
+The `web` action serves a browser version of the monitor. It runs entirely in the browser with TensorFlow.js and MediaPipe's face and pose landmarkers, so no video leaves the computer. It follows the face flow of Section 7 with the slump sign and the check-in, but not the other body-language signs. It also analyses a single uploaded or pasted photo (Figure 14).
+
+![Figure 14. The browser demo analysing a photo from YawDD. The scanned view marks the eyes, mouth and head with their readings: both eyes open, a yawn, and the head upright.](docs/paper/figures/web_demo.png){14}
 
 ## 8.4 Dashboard and session reports
 
@@ -282,7 +284,7 @@ Beside the video, the dashboard shows the alert level, each sign with its timer,
 
 ## 9.1 Accuracy on unseen people
 
-Both models were tested on the test split of Section 4.3, whose people the models never saw in training, using the decision rule of Section 5.3. Table 7 gives the results and Figure 14 the confusion matrices.
+Both models were tested on the test split of Section 4.3, whose people the models never saw in training, using the decision rule of Section 5.3. Table 7 gives the results and Figure 15 the confusion matrices.
 
 | Measure | Eye model | Yawn model |
 |---|---|---|
@@ -297,7 +299,7 @@ Table: Table 7. Test results on people not seen in training.
 
 The eye model reads 96.3% of closed eyes and 97.0% of open eyes correctly, and marks only 1.2% of visible eyes as *blocked*, so a covered eye rarely hides a real closure. It is strongest on MRL Eye, at 97.4% for closed and 95.6% for open eyes, and weakest on closed eyes in the small, low-resolution CEW patches and on the four-person NTHU-DDD set, at 87 to 89%. The yawn model is the weaker of the two. It misses 17.4% of yawns, reading them as an ordinary mouth, while only 2.3% of non-yawning mouths are taken for a yawn. Its test split holds only nine people, so its figures are less certain than the eye model's.
 
-![Figure 14. Confusion matrices on the test split. Each row shows how the crops of one actual class were classified.](docs/paper/figures/confusion.png){13}
+![Figure 15. Confusion matrices on the test split. Each row shows how the crops of one actual class were classified.](docs/paper/figures/confusion.png){13}
 
 ## 9.2 Speed
 
@@ -317,9 +319,9 @@ The helmet photos of Section 3.3 test WATCH on real riders, with the duplicated 
 | Body pose found | 69.8% | 55.9% |
 Table: Table 8. Readings on the motorcycle helmet photos.
 
-The eye model separates the sessions clearly: closed-eye readings rise from 3.7% when alert to 38.2% when drowsy. Every rider whose face was found in both sessions has more closed-eye readings in the drowsy one, including all seven riders with trusted labels (Figure 15). The face was found in 84 to 85% of photos, but much less often at side angles: never in P10's alert session, and in 46% of P07's drowsy session.
+The eye model separates the sessions clearly: closed-eye readings rise from 3.7% when alert to 38.2% when drowsy. Every rider whose face was found in both sessions has more closed-eye readings in the drowsy one, including all seven riders with trusted labels (Figure 16). The face was found in 84 to 85% of photos, but much less often at side angles: never in P10's alert session, and in 46% of P07's drowsy session.
 
-![Figure 15. Share of eye readings classed closed for each rider. Asterisks mark doubtful labels. P10's face was not found in the alert session.](docs/paper/figures/helmet_closed.png){8}
+![Figure 16. Share of eye readings classed closed for each rider. Asterisks mark doubtful labels. P10's face was not found in the alert session.](docs/paper/figures/helmet_closed.png){8}
 
 The mouth results are mixed. Helmets and face covers hide the mouth in about half the photos, and the *blocked* class catches most of them. Two covers fool it, however: P02's neck gaiter is read as a yawn in 90% of alert photos and the vents in P05's chin bar in all of them. Because such a cover stays in place, a live session would likely see these readings persist and raise a false yawn warning. Body pose was found in 70% of alert and 56% of drowsy photos, but in only 4 to 23% for P03, P04 and P11, whose photos are close-up and leave the shoulders out of frame.
 
