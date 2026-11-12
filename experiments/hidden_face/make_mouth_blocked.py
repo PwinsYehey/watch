@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from watch.config import PROJECT_ROOT
-from watch.face import FaceTracker
+from watch.face import MOUTH_AXIS, MOUTH_IDS, FaceTracker, aligned_crop
 from watch.live import remove_glare
 
 OUT = PROJECT_ROOT / "data" / "raw" / "yawn" / "yawdd" / "blocked"
@@ -89,11 +89,93 @@ def overlay_crops(videos, stride):
     return written
 
 
+CHEEKS, CHIN, FACE_EDGES = (205, 425), 152, (234, 454)
+
+
+def take(frame, x0, y0, pw, ph):
+    h, w = frame.shape[:2]
+    x0, y0 = int(x0), int(y0)
+    if x0 < 0 or y0 < 0 or x0 + pw > w or y0 + ph > h:
+        return None
+    return frame[y0:y0 + ph, x0:x0 + pw].astype(np.float32)
+
+
+def cover_mouth(frame, landmarks, rng, pool):
+    h, w = frame.shape[:2]
+    pts = np.array([(landmarks[i].x * w, landmarks[i].y * h) for i in MOUTH_IDS])
+    (x0, y0), (x1, y1) = pts.min(0), pts.max(0)
+    bw, bh = (x1 - x0) * rng.uniform(1.6, 2.2), (y1 - y0) * 2.6 + (x1 - x0) * rng.uniform(0.25, 0.5)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2 + bh * rng.uniform(-0.05, 0.1)
+    box = [int(cx - bw / 2), int(cy - bh / 2), int(cx + bw / 2), int(cy + bh / 2)]
+    if min(box[0], box[1]) < 0 or box[2] > w or box[3] > h:
+        return None, None
+    pw, ph = box[2] - box[0], box[3] - box[1]
+    kind = rng.choice(["hand", "cloth", "background", "object"], p=[0.35, 0.2, 0.2, 0.25])
+    if kind == "hand":
+        cheek = landmarks[CHEEKS[int(rng.integers(2))]]
+        sw = (x1 - x0) * rng.uniform(0.35, 0.55)
+        src = take(frame, cheek.x * w - sw / 2, cheek.y * h - sw / 3, int(sw), int(sw * 2 / 3))
+        patch = None if src is None else cv2.GaussianBlur(cv2.resize(src, (pw, ph)), (0, 0), max(1.0, pw * 0.015))
+        if patch is not None:
+            ys, xs = np.mgrid[0:ph, 0:pw].astype(np.float32)
+            gaps = (np.abs(np.sin((xs * rng.uniform(0.9, 1.1) + ys * rng.uniform(-0.5, 0.5)) * np.pi / (pw / rng.uniform(3.5, 5)))) < 0.18).astype(np.float32)
+            patch = patch - cv2.GaussianBlur(gaps, (0, 0), max(1.0, pw * 0.02))[..., None] * rng.uniform(8, 25)
+    elif kind == "cloth":
+        chin = landmarks[CHIN]
+        patch = take(frame, cx - pw / 2 + rng.uniform(-0.3, 0.3) * pw, chin.y * h + ph * rng.uniform(0.6, 1.4), pw, ph)
+    elif kind == "background":
+        edge = landmarks[FACE_EDGES[int(rng.integers(2))]]
+        side = -1 if edge.x * w < cx else 1
+        patch = take(frame, edge.x * w + side * pw * rng.uniform(0.3, 0.9) - (pw if side < 0 else 0), cy - ph / 2 + rng.uniform(-0.5, 0.5) * ph, pw, ph)
+    else:
+        if not pool:
+            return None, None
+        other = pool[int(rng.integers(len(pool)))]
+        oh, ow = other.shape[:2]
+        patch = take(other, rng.uniform(0, max(1, ow - pw)), rng.uniform(0, max(1, oh - ph)), pw, ph)
+    if patch is None:
+        return None, None
+    patch = patch * rng.uniform(0.75, 1.2) + shade(ph, pw, rng)[..., None] * 0.4
+    mask = cv2.GaussianBlur(np.ones((ph, pw), np.float32), (0, 0), max(1.0, pw * 0.04))[..., None]
+    out = frame.astype(np.float32).copy()
+    region = out[box[1]:box[3], box[0]:box[2]]
+    out[box[1]:box[3], box[0]:box[2]] = region * (1 - mask) + patch * mask
+    cropped = aligned_crop(np.clip(out, 0, 255).astype(np.uint8), landmarks, MOUTH_IDS, MOUTH_AXIS, 0.3, False)
+    return (cropped[0] if cropped is not None else None), kind
+
+
+def covers(videos, per_video, rng):
+    written, pool = 0, []
+    with FaceTracker() as tracker:
+        for video in videos:
+            capture = cv2.VideoCapture(str(video))
+            total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            for index in np.linspace(30, max(31, total - 1), per_video * 2).astype(int):
+                capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+                ok, frame = capture.read()
+                if not ok or not (regions := tracker.extract(remove_glare(frame))):
+                    continue
+                crop, kind = cover_mouth(frame, regions.landmarks, rng, pool)
+                if crop is not None:
+                    cv2.imwrite(str(OUT / f"{person_of(video)}_blocked_cover_{kind}_{video.stem}_{index:05d}.jpg"), crop)
+                    written += 1
+                if len([f for f in OUT.glob(f"{person_of(video)}_blocked_cover_*_{video.stem}_*")]) >= per_video:
+                    break
+            if ok:
+                pool = (pool + [frame])[-20:]
+            capture.release()
+            print("covers", video.name, written, flush=True)
+    return written
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(7)
     manifest = pd.read_csv(PROJECT_ROOT / "data" / "splits" / "yawn_manifest.csv", dtype={"subject_id": str})
     if "synthetic" in sys.argv[1:]:
         print("synthetic", synthetic(manifest, rng, cap=40), flush=True)
+    if "covers" in sys.argv[1:]:
+        clear = sorted(p for p in (PROJECT_ROOT / "data" / "raw" / "yawn" / "yawdd_videos").rglob("*.avi") if "SunGlasses" not in p.name)
+        print("covers", covers(clear, per_video=12, rng=rng), flush=True)
     if "overlays" in sys.argv[1:]:
         print("overlays", overlay_crops(sorted(p for p in Path(sys.argv[-1]).glob("*.avi") if ".part" not in p.name), stride=6), flush=True)

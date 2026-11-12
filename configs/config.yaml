@@ -54,7 +54,7 @@ models:
     class_names: [no_yawn, yawn, blocked]
     positive_class: yawn
     unreadable_class: blocked
-    unreadable_threshold: 0.9
+    unreadable_threshold: 0.7
     grayscale: false
     architecture: tiny_cnn
     dropout_rate: 0.5
