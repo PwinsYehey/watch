@@ -20,7 +20,7 @@ const CONFIG = {
   },
   "yawnUnreadable": {
     "className": "blocked",
-    "threshold": 0.9
+    "threshold": 0.7
   },
   "alertness": {
     "closedDurationThresholdSec": 1.5,
