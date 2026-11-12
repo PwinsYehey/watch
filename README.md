@@ -61,7 +61,9 @@ A Pi with a camera module and no screen runs the same monitor and shows it in a 
 
 The page has buttons for mute, export and stop (the `m`, `e` and `q` keys also work), and plays the alarm once **Enable alarm sound** is clicked. With `--allow-shutdown` it also has a button that powers the Pi off. Reports are saved on the Pi in `results/sessions/`.
 
-The hardware in use is a Raspberry Pi 4 Model B (8 GB), a 32 GB microSD card and an IMX219 night vision camera with two IR LED modules. The picture is black and white with lowered exposure, so a face near the IR LEDs stays readable.
+The hardware in use is a Raspberry Pi 4 Model B (8 GB), a 32 GB microSD card and a Camera Module 3 NoIR, using the camera's default picture.
+
+By default (`mode: both` under `live` in `configs/config.yaml`) the face and body language count together: eyes, yawning and head, plus slumping, leaning forward, nodding off and staying still. `mode: body` uses body language alone, for users in helmets, and `mode: face` is the original face-first behaviour.
 
 The full walkthrough, with the hardware, step-by-step use, every command, a troubleshooting table and the known limits, is in [docs/raspberry-pi.md](docs/raspberry-pi.md).
 

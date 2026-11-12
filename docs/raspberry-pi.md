@@ -2,7 +2,7 @@
 
 How to run the live monitor on a Raspberry Pi with a camera module and watch it from a browser on a laptop. The Pi needs no screen.
 
-Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie). It runs at about 10 to 17 FPS with a face in view.
+Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie) and a Camera Module 3 NoIR. In the default **both** mode it runs at about 4 to 6 FPS with a face in view, and about 8 to 10 FPS in **body** mode.
 
 ## Hardware
 
@@ -10,21 +10,49 @@ Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 1
 |---|---|---|
 | Raspberry Pi 4 Model B | 8 GB RAM | Runs the monitor, the models and the web page. |
 | microSD card | 32 GB | Holds the OS, the project, the Python environment and the session reports. |
-| IMX219 night vision camera | 8 MP, 160 degree lens, no IR filter, with two IR LED modules that take power through the camera's screw holes | The camera in use. It needs the setting in [Connect the camera](#1-connect-the-camera). |
+| Camera Module 3 NoIR | `imx708_noir`, 12 MP, autofocus, no IR filter | The camera in use. The Pi detects it by itself. |
 | Camera ribbon | Same width at both ends | Connects the camera to the **CAMERA** connector. Ribbons with one narrow end are for a Pi 5 or Zero and do not fit a Pi 4 directly. |
 | USB-C power supply | 5 V 3 A wall adapter | A laptop USB port may not supply enough, and a weak supply can make the Pi reboot or drop off the network. |
 | Heatsink or small fan | Recommended | The Pi reached about 71 C under load with the IR modules on. It starts slowing down at 80 C. |
 | Ethernet cable | Optional, with a USB adapter if the laptop has no port | Connects the Pi straight to a laptop when there is no shared Wi-Fi. |
 
-### Camera Module 3 NoIR
+### Other cameras that were tried
 
-The project was first run on a Camera Module 3 NoIR (`imx708_noir`, 12 MP, autofocus), and it also works without the IMX219 setting below.
+- **IMX219 night vision camera** (no IR filter, with two IR LED modules). The Pi detected it but never received a picture ("Camera frontend has timed out"), with two different ribbons and the IR modules removed, and later stopped detecting it at all. The board is faulty. A working one needs the IMX219 setting in [Connect the camera](#1-connect-the-camera).
+- **A regular IMX219** (with an IR filter). It works in a lit room, but its IR filter blocks the IR LEDs' light, so it sees nothing in the dark. Only a NoIR or night vision camera can use IR light.
+
+### IR LEDs on the Camera Module 3
 
 IR LED boards bought for night vision cameras get no power when screwed onto this camera, because the official module does not put power on its screw holes. They need their own wires from the Pi's 3.3 V and ground pins, and the board and camera should be checked with a multimeter first so the + pad cannot short to the camera. This wiring has not been done or tested.
 
 ### Which light it is for
 
 The IR modules light the face without bothering the person, and a camera with no IR filter can see that light. Eyes were visible through a pair of tinted shades this way, but the monitor has not yet been tested reading eyes through shades or a tinted visor. See [Known limits](#known-limits).
+
+## Detection modes
+
+Set with `mode` under `live` in `configs/config.yaml`, then restart the service.
+
+| Mode | What decides | When to use it |
+|---|---|---|
+| `both` (default) | The face (eyes closed, yawning, head drooped) and body language (posture, nodding, leaning forward, stillness), together. | Works with and without a helmet. When a helmet hides the face, the face rows show "not visible" and the body keeps deciding. |
+| `body` | Body language alone. The eye and yawn models are not loaded and there are no check-in prompts. | Users who always wear a helmet. Lighter on the Pi, so the video is smoother. |
+| `face` | The face, with body language only once the face is covered. | The original behaviour, before body language was added. |
+
+### Body language signs
+
+All are measured against the sitting posture taken during calibration, so the camera needs the head and both shoulders in view.
+
+| Sign | What it means | Setting under `body` |
+|---|---|---|
+| Slumped | The shoulders drop, the shoulder line tilts, or the head sinks toward the shoulders. A raised arm tilts the shoulders, so the tilt is ignored while an arm is up. | `drop_limit`, `lean_limit_deg`, `head_drop_limit` |
+| Leaning forward | The shoulders look wider because the person has leaned toward the camera. | `forward_limit` |
+| Nodding off | The head drops and comes back up quickly, 3 times within 60 seconds. A drop that stays down counts as slumped instead. | `nod_drop`, `nod_max_sec`, `nods_window_sec`, `nods_limit` |
+| Not moving | The shoulders and head stay almost still for 45 seconds. | `still_window_sec`, `still_limit` |
+
+The head position is the average of whichever head points the body tracker can see, so it still works under a helmet. The **Body** row on the dashboard shows "slumped", "nodding" or "not moving" when one of them fires, and "arm raised" when an arm is up.
+
+These limits are starting values. They still need tuning with real tests of people wearing helmets.
 
 ## Quick test (Pi already set up)
 
@@ -33,9 +61,9 @@ The IR modules light the face without bothering the person, and a camera with no
    - **Same Wi-Fi** as the Pi, or
    - **Ethernet cable** straight from the Pi to the laptop. No router or laptop setup is needed; allow up to a minute after plugging in.
 3. Open **http://raspberrypi.local:8766** in a browser. If the name is not found, use the Pi's address: `http://<address>:8766`.
-4. Fix the camera in place, level with the face and about 50 to 70 cm away, with the whole face including the chin in the picture.
-5. Look straight at the camera with your eyes open and hold still for the 4-second calibration.
-6. Close your eyes, yawn or drop your head to see WARNING and CRITICAL.
+4. Fix the camera in place, level with the face and about 1 metre away, with the head and both shoulders in the picture. Too close, and the body tracker cannot find the shoulders.
+5. Sit upright, look straight at the camera with your eyes open and hold still for the 4-second calibration.
+6. Close your eyes, yawn, drop your head, slump or nod to see WARNING and CRITICAL.
 7. When you are done, click **Shut down device**, confirm, wait for the green light to stop blinking, then unplug the power.
 
 To calibrate again, move out of view for at least 3 seconds and come back. Do this whenever the camera has moved, because the head limits depend on where the camera is.
@@ -54,6 +82,7 @@ On the page:
 
 - One event, such as a yawn lasting 2 seconds, gives a WARNING. The warning stays for 30 seconds after the event, even once the mouth has closed, so that repeats can add up. The **Yawn** row under Signs shows what the mouth is doing now.
 - A repeat, a second sign, or closed eyes or a dropped head that persist make it CRITICAL. CRITICAL drops to a "recovering" warning after 5 calm seconds.
+- If nobody has been in view for 5 seconds, any alert is cleared and the alarm stops (`lost_reset_sec` under `live`), so an alert cannot stay on when the camera loses the person. When someone comes back into view it calibrates again.
 - These times are `window_sec` and `calm_sec` in `configs/config.yaml`.
 
 ### Turning it off
@@ -82,6 +111,10 @@ Type the Pi's password when asked, then wait for the green light as above.
 | `scripts/watch-pi.service` | New. systemd user service that starts the monitor at boot. |
 | `scripts/watch-pi-poweroff.rules` | New. polkit rule that lets the **Shut down device** button power the Pi off without a password. |
 | `tests/test_stream.py` | New. Tests for the browser page's endpoints, with the power-off command mocked. |
+| `src/watch/body.py` | Adds leaning forward, and finds the head from whichever head points are visible. Includes the raised-arm check from `development`. |
+| `src/watch/alertness.py` | Adds the nodding counter and the stillness check, and their alert names. |
+| `src/watch/live.py` | Adds the `both`, `body` and `face` modes, clears an alert once nobody has been in view for 5 seconds, and runs body tracking every second frame in body mode. The dashboard keeps the same layout in every mode. |
+| `scripts/setup-pi.sh` | Also downloads MediaPipe's body pose model, since the monitor cannot download it later on a Pi with no internet. |
 
 Without the new options, `live` opens an OpenCV camera with `--camera N` and shows a desktop window as before.
 
@@ -143,7 +176,7 @@ mkdir -p ~/watch && tar xzf ~/watch.tar.gz -C ~/watch && rm ~/watch.tar.gz
 cd ~/watch && ./scripts/setup-pi.sh
 ```
 
-This installs Python 3.12 through uv and about 1.5 GB of packages, so it takes a while on a slow connection. The Pi's own Python (3.13 on trixie) is too new for the pinned TensorFlow and MediaPipe versions, which is why the script brings its own. It ends by printing the result of `check`.
+This installs Python 3.12 through uv and about 1.5 GB of packages, so it takes a while on a slow connection. It also downloads MediaPipe's body pose model, so the Pi needs internet for this step only. The Pi's own Python (3.13 on trixie) is too new for the pinned TensorFlow and MediaPipe versions, which is why the script brings its own. It ends by printing the result of `check`.
 
 ### 4. Run it once by hand
 
@@ -185,7 +218,11 @@ By default the Pi's Ethernet port waits for a router to give it an address, so a
 sudo nmcli con mod netplan-eth0 ipv4.link-local enabled ipv4.dhcp-timeout infinity ipv4.may-fail yes && sudo nmcli con up netplan-eth0
 ```
 
-`netplan-eth0` is the connection name on Raspberry Pi OS trixie; list the names with `nmcli con show` if it differs.
+`netplan-eth0` is the connection name on Raspberry Pi OS trixie. List the names with `nmcli con show` if it differs: with a USB Ethernet adapter on the Pi it was `Wired connection 2`.
+
+Without this the connection keeps resetting while it waits for a router, which cuts SSH and the page every few minutes, and the Pi has only an IPv6 address, which Edge and Chrome cannot open. With it, the Pi also has a `169.254.x.x` address, shown by `hostname -I`, and `http://169.254.x.x:8766` works in any browser.
+
+On the laptop, IPv6 must be on for the Ethernet adapter, or `raspberrypi.local` is not found over the cable. In Windows: **Win + R**, `ncpa.cpl`, right-click the adapter, **Properties**, tick **Internet Protocol Version 6 (TCP/IPv6)**.
 
 ## Commands
 
@@ -248,9 +285,13 @@ Run `./scripts/setup-pi.sh` again only if `pyproject.toml` changed.
 | Problem | What to check |
 |---|---|
 | The page does not load | Give the Pi a minute after power-on. Check `systemctl --user status watch.service`. Over a cable, wait up to a minute after plugging in. |
+| The Pi freezes (only the red light on, green stopped blinking) | Unplug and replug it. It froze when body tracking ran on every frame; body mode now runs it every second frame (`body_mode_every_n_frames`). If it happens again, raise that number or add cooling. |
+| "Camera frontend has timed out" | The Pi talks to the camera but receives no picture. Reseat the ribbon and try another ribbon; if it continues, the camera board is faulty. |
 | `raspberrypi.local` is not found | The laptop may block mDNS (some managed machines and firewalls do). Find the Pi's address with `hostname -I` on the Pi and use `http://<address>:8766`. |
+| The monitor keeps restarting with `Temporary failure in name resolution` in its log | MediaPipe is trying to download its body pose model with no internet. Run `./scripts/setup-pi.sh` once with internet, or copy `pose_landmark_lite.tflite` from <https://storage.googleapis.com/mediapipe-assets/> into `.venv/lib/python3.12/site-packages/mediapipe/modules/pose_landmark/`. |
 | `No cameras available!` or `Could not open camera pi` | The page stays down because the monitor keeps restarting without a camera. Reseat the ribbon at both ends with the Pi powered off. For an IMX219 camera, apply the setting in step 1. |
-| Black video, "NO FACE DETECTED" | The lens is covered or pointing away, or the room is too dark. |
+| Black video, "NO FACE DETECTED" | The lens is covered or pointing away, or the room is too dark. A camera with an IR filter stays black in the dark even with IR LEDs on. |
+| "Person: shoulders not seen" | The camera is too close or aimed too high. Move it back so the head and both shoulders are in view. |
 | The picture is pink or purple | Normal for a NoIR camera. Add `--saturation 0` to the command in `src/watch/camera.py` for black and white. |
 | The face is washed out and "Eyes: 0 of 2 readable" | Too much IR on the face. Move back or angle the IR modules. |
 | "Lighting: low, boosted" | Add light on the face. A lamp from the front or a window you are facing works. |
@@ -264,14 +305,13 @@ Run `./scripts/setup-pi.sh` again only if `pyproject.toml` changed.
 
 ## Known limits
 
+- **The body language limits are untested starting values.** They need tuning with people wearing helmets in the real seating position.
+- **Both mode is slow on a Pi 4,** about 4 to 6 FPS, because the face and body models run together. Short eye closures can be missed. Body mode is smoother.
 - **Not finished for a tinted visor.** Eyes were visible through tinted shades on the camera, but the monitor has not been tested reading them through shades or a visor.
 - **Daytime use is the current target.** Working in full darkness has not been tested.
 - **The open-eye change has not been tested on a face yet.** The change in `live.py` passes the unit tests, but no one has confirmed yet that it stops the false alarm while still catching closed eyes.
-- **The mouth is often "not readable" on the IMX219 camera,** so yawn alerts are not reliable yet. The yawn model was trained on colour video and the picture is now black and white.
-- **The camera sometimes stalls.** "CAMERA LOST" came up about 4 times in 5 minutes with both IR modules on, and the cause is not known. Each one can also trigger a recalibration.
-- **The picture is still a little soft,** which may be the lens focus or the small 640x480 frame.
 - **The Pi runs hot** with no cooling, so keep sessions short until a heatsink or fan is fitted.
-- About 10 to 17 FPS on a Pi 4. Alert timing is measured in seconds, so the logic still holds, but the video is not smooth. Running the TFLite models in `models/` instead of the Keras ones should be faster and has not been done yet.
+- Alert timing is measured in seconds, so the logic still holds, but the video is not smooth. Running the TFLite models in `models/` instead of the Keras ones should be faster and has not been done yet.
 - The page has no login. Anyone on the same network can view the camera and press the buttons, including **Shut down device**, so use it on a trusted network only.
 - Exported reports stay on the Pi; copy them off with `scp <user>@raspberrypi.local:~/watch/results/sessions/* .`.
 - `--stream` should also work on Windows and Linux with a normal webcam, but it has only been run on the Pi.
