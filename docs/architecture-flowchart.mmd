@@ -11,35 +11,50 @@ flowchart TD
   classDef ok fill:#e6f6e6,stroke:#0ca30c,stroke-width:2px,color:#0b0b0b
 
   %% ---------------- Offline model training ----------------
-  subgraph OFF["OFFLINE · Model training (Linux / WSL2)"]
+  subgraph OFF["OFFLINE · Model training (Linux / WSL2, GPU)"]
     direction TB
     DS@{ shape: cyl, label: "Datasets<br/>MRL Eye · CEW · NTHU-DDD · YawDD" }
-    PREP["prepare-data<br/>extract eye & mouth crops,<br/>audit, subject-disjoint splits"]
-    TRAIN["train eye CNN & yawn CNN"]
+    HID@{ shape: cyl, label: "'Can't see' examples<br/>eyes: tinted / mirror / glare lenses, YawDD sunglasses,<br/>visor overlays · mouths: masks, hands, cloth,<br/>balaclavas, objects, visor + mask overlays" }
+    PREP["prepare-data<br/>eye & mouth crops, audit,<br/>person-disjoint splits (each person stays in one split)"]
+    TRAINE["Train eye CNN<br/>3 answers: closed · open · blocked"]
+    TRAINY["Train yawn CNN (yawn · no yawn)<br/>+ covered-mouth branch (blocked)<br/>combined into one model, yawn decision unchanged"]
     BETTER{"Better than current<br/>model on validation?"}
     KEEP["Keep new model"]
     DROP["Keep current model"]
-    EVAL["evaluate & benchmark<br/>(accuracy, ROC, latency)"]
-    EXP["export<br/>.keras · TF.js · TFLite · web/config.js"]
-    DS --> PREP --> TRAIN --> BETTER
+    EVAL["evaluate & benchmark<br/>held-out people, helmet photos,<br/>visor / mask replays"]
+    EXP["export<br/>.keras · TF.js (incl. branched models) ·<br/>TFLite · web/config.js"]
+    REC@{ shape: cyl, label: "Device recordings<br/>watch record (buzzer-cued<br/>open / closed eye crops)" }
+    FT["watch finetune (optional, on the Pi)<br/>eye model head, held-out takes"]
+    DS --> PREP
+    HID --> PREP
+    PREP --> TRAINE --> BETTER
+    PREP --> TRAINY --> BETTER
     BETTER -- Yes --> KEEP --> EVAL
     BETTER -- No --> DROP --> EVAL
     EVAL --> EXP
+    REC --> FT
   end
 
-  MODELS@{ shape: cyl, label: "Trained models<br/>eye_model · yawn_model" }
-  CFG@{ shape: cyl, label: "configs/config.yaml<br/>thresholds & timings" }
+  MODELS@{ shape: cyl, label: "Trained models<br/>eye_model (3 answers) ·<br/>yawn_model (3 answers)" }
+  CFG@{ shape: cyl, label: "configs/config.yaml<br/>mode, thresholds & timings" }
   EXP --> MODELS
+  FT --> MODELS
 
   %% ---------------- Startup ----------------
-  START@{ shape: stadium, label: "Start<br/>python -m watch live · or web app: Use camera" }
-  LOAD["Load settings, eye & yawn CNNs,<br/>MediaPipe Face Mesh (+ zoom fallback detector)"]
-  OPEN@{ shape: lean-r, label: "Open camera" }
+  START@{ shape: stadium, label: "Start<br/>python -m watch live [--camera N | pi] [--stream]<br/>· Pi service at boot · web app: Use camera" }
+  MODE{"Mode?<br/>(config live.mode)"}
+  LOADF["face / both:<br/>load eye & yawn models,<br/>Face Mesh (+ zoom fallback)"]
+  LOADB["body: skip the face models<br/>(lighter on a Pi)"]
+  LOADP["Load Pose tracker<br/>(shoulders, elbows, wrists, nose)"]
+  OPEN@{ shape: lean-r, label: "Open camera<br/>OpenCV index · Pi camera (rpicam-vid)" }
   OPENED{"Camera opened?"}
   CAMERR@{ shape: lean-r, label: "Show error:<br/>try another camera" }
-  CFG -.-> LOAD
-  MODELS -.-> LOAD
-  START --> LOAD --> OPEN --> OPENED
+  CFG -.-> MODE
+  MODELS -.-> LOADF
+  START --> MODE
+  MODE -- face / both --> LOADF --> LOADP
+  MODE -- body --> LOADB --> LOADP
+  LOADP --> OPEN --> OPENED
   OPENED -- No --> CAMERR --> B3(("B"))
   OPENED -- Yes --> CAL1@{ shape: subproc, label: "Calibrate (4 s)" }
   CAL1 --> READ
@@ -51,29 +66,30 @@ flowchart TD
     C0@{ shape: stadium, label: "Enter calibration" }
     C1@{ shape: lean-r, label: "Read frame" }
     C2["Remove glare · lift low light"]
-    C3["Face Mesh landmarks"]
-    C4{"Face found?"}
-    C5["Collect EAR (both eyes),<br/>head pitch & roll"]
-    CDISP@{ shape: curv-trap, label: "Dashboard: CALIBRATING<br/>+ countdown" }
+    C3["Face Mesh landmarks (not in body mode)<br/>+ Pose landmarks"]
+    C5["Collect EAR (both eyes), head pitch & roll,<br/>sitting posture (shoulders, head height)"]
+    CDISP@{ shape: curv-trap, label: "Dashboard: CALIBRATING + countdown<br/>'look at the camera' / 'sit upright'" }
     C6{"4 s elapsed?"}
-    C7{"≥ 10 eye samples?"}
+    C7{"≥ 10 eye samples and<br/>resting EAR ≥ 0.20?"}
     C8["Personal eye limits<br/>open = median EAR · closed = open − 0.10<br/>Status: personal"]
-    C9["Default eye limits<br/>Status: default"]
+    C9["Default eye limits<br/>(no face, or eyes hidden, e.g. sunglasses)"]
     C10{"≥ 10 head samples?"}
     C11["Personal head limits<br/>resting pitch / roll + 25°"]
     C12["Default head limits"]
-    C13["Reset smoothers, sign monitors<br/>and alert level · stop alarm"]
+    C15{"≥ 5 posture samples?"}
+    C16["Personal posture baseline<br/>(body signs enabled)"]
+    C17["No baseline:<br/>body signs wait for next calibration"]
+    C13["Reset smoothers, sign monitors,<br/>check-in and alert level · stop alarm"]
     C14@{ shape: stadium, label: "Return" }
-    C0 --> C1 --> C2 --> C3 --> C4
-    C4 -- Yes --> C5 --> CDISP
-    C4 -- No --> CDISP
-    CDISP --> C6
+    C0 --> C1 --> C2 --> C3 --> C5 --> CDISP --> C6
     C6 -- No --> C1
     C6 -- Yes --> C7
     C7 -- Yes --> C8 --> C10
     C7 -- No --> C9 --> C10
-    C10 -- Yes --> C11 --> C13
-    C10 -- No --> C12 --> C13
+    C10 -- Yes --> C11 --> C15
+    C10 -- No --> C12 --> C15
+    C15 -- Yes --> C16 --> C13
+    C15 -- No --> C17 --> C13
     C13 --> C14
   end
 
@@ -82,33 +98,42 @@ flowchart TD
     direction TB
     READ@{ shape: lean-r, label: "Read camera frame" }
     GOT{"Frame available?"}
+    LOST@{ shape: subproc, label: "Camera lost: show CAMERA LOST,<br/>alarm after 3 s, retry every 1 s,<br/>recalibrate when back" }
     MIRROR["Mirror frame"]
     GLARE["Remove glare inside last face box<br/>(visor / glasses reflections)"]
     DARK{"Frame brightness < 0.30?"}
     LIFT["Gamma-lift brightness to 0.45"]
     READ --> GOT
+    GOT -- No --> LOST
     GOT -- Yes --> MIRROR --> GLARE --> DARK
     DARK -- Yes --> LIFT
   end
-  GOT -- No --> B2(("B"))
+  LOST --> A0(("A"))
 
-  %% ---------------- Face detection ----------------
-  subgraph DET["2 · FACE DETECTION"]
+  %% ---------------- Detection ----------------
+  subgraph DET["2 · FACE & BODY DETECTION"]
     direction TB
-    MESH["MediaPipe Face Mesh<br/>478 face landmarks"]
+    MESH["MediaPipe Face Mesh · 478 landmarks<br/>(skipped in body mode)"]
     FOUND{"Face found?"}
     ZOOM["Full-range face detector →<br/>zoom in → Face Mesh again"]
-    FOUND2{"Face found?"}
-    BACK{"Face back after<br/>≥ 3 s away?"}
-    NOFACE["No face: start / continue absence timer<br/>all signs = not visible"]
+    POSEDET["MediaPipe Pose · shoulders, elbows,<br/>wrists, nose (every 3rd frame,<br/>every 2nd in body mode)"]
+    PERSON{"Person in view?<br/>(face or shoulders)"}
+    AWAY["Nobody in view: absence timer<br/>alert held · cleared after 5 s<br/>screen: NO FACE / NO PERSON"]
+    BACK{"Back after<br/>≥ 3 s away?"}
+    COVER["Face not found but shoulders seen:<br/>FACE COVERED<br/>(visor + mask) · keep monitoring"]
     MESH --> FOUND
-    FOUND -- No --> ZOOM --> FOUND2
-    FOUND2 -- No --> NOFACE
-    FOUND -- Yes --> BACK
-    FOUND2 -- Yes --> BACK
+    FOUND -- No --> ZOOM
+    FOUND --> PERSON
+    ZOOM --> PERSON
+    POSEDET --> PERSON
+    PERSON -- No --> AWAY
+    PERSON -- "Yes, face seen" --> BACK
+    PERSON -- "Yes, shoulders only" --> COVER --> BACK
   end
   DARK -- No --> MESH
   LIFT --> MESH
+  DARK -- No --> POSEDET
+  LIFT --> POSEDET
   BACK -- Yes --> RECAL@{ shape: subproc, label: "Recalibrate (4 s)<br/>log 'recalibrated'" }
   RECAL --> A1(("A"))
 
@@ -117,55 +142,95 @@ flowchart TD
     direction TB
     CROP["Crop eyes & mouth<br/>(rotate level if tilted > 15°)"]
     DETAIL{"Crop has detail?<br/>(not a flat visor)"}
-    UNREAD["Region not readable"]
-    EYECNN["Eye CNN · both eyes in one batch<br/>closed probability"]
-    EYECONF{"CNN confidence ≥ 0.65?"}
-    EYESCORE["Eye closedness = max(CNN,<br/>3D EAR ≤ closed limit & glare < 15%)<br/>per-eye smoothing · near eye weighted more"]
-    YAWNCNN["Yawn CNN<br/>yawn probability"]
-    YAWNCONF{"CNN confidence ≥ 0.65?"}
+    UNREAD["Region NOT READABLE<br/>(never counts as closed / yawning)"]
+    EYECNN["Eye CNN · both eyes in one batch<br/>closed · open · blocked"]
+    EYEOK{"Blocked ≥ 0.90<br/>or confidence < 0.65?"}
+    EYEDEC{"eye_decision?"}
+    EYESHAPE{"CNN says closed but<br/>eye shape clearly open?<br/>(lens fooling the CNN)"}
+    EYESCORE["Eye closedness<br/>cnn: CNN alone · shape_gate: CNN + 3D EAR<br/>per-eye smoothing · near eye weighted more"]
+    YAWNCNN["Yawn model<br/>yawn · no yawn · blocked"]
+    YAWNOK{"Blocked ≥ 0.70<br/>or confidence < 0.65?"}
+    MOUTHSHAPE{"CNN says yawn but<br/>mouth shape closed?<br/>(mask / chin guard)"}
     MOUTHSCORE["Mouth openness = max(CNN,<br/>3D MAR scaled 0.30 → 0.60)"]
-    POSE["Head pose from landmarks<br/>pitch (down) & roll (sideways)"]
+    POSE["Head pose from landmarks<br/>pitch (solvePnP) · roll (eye line, no 180° flip)"]
     DROOP["Head droop = down + sideways combined<br/>vs calibrated limits (diagonals count)"]
+    BODY["Body vs calibrated posture<br/>shoulder drop · shoulder lean · head drop ·<br/>leaning forward (shoulders look wider)"]
+    ARM{"Arm raised?<br/>(wrist / elbow above shoulder)"}
+    NOLEAN["Ignore the shoulder lean<br/>(Body: arm raised)"]
+    SLUMP["Slump score<br/>(drop 0.10 · lean 10° · head 0.25 · forward 0.20)"]
+    NODS["Nod counter<br/>head drops ≥ 0.12 and back within 2.5 s"]
+    STILL["Stillness<br/>shoulders & head move < 0.05 over 45 s"]
     CROP --> DETAIL
     DETAIL -- No --> UNREAD
-    DETAIL -- Yes --> EYECNN --> EYECONF
-    EYECONF -- No --> UNREAD
-    EYECONF -- Yes --> EYESCORE
-    DETAIL -- Yes --> YAWNCNN --> YAWNCONF
-    YAWNCONF -- No --> UNREAD
-    YAWNCONF -- Yes --> MOUTHSCORE
+    DETAIL -- Yes --> EYECNN --> EYEOK
+    EYEOK -- Yes --> UNREAD
+    EYEOK -- No --> EYEDEC
+    EYEDEC -- shape_gate --> EYESHAPE
+    EYEDEC -- cnn --> EYESCORE
+    EYESHAPE -- Yes --> UNREAD
+    EYESHAPE -- No --> EYESCORE
+    DETAIL -- Yes --> YAWNCNN --> YAWNOK
+    YAWNOK -- Yes --> UNREAD
+    YAWNOK -- No --> MOUTHSHAPE
+    MOUTHSHAPE -- Yes --> UNREAD
+    MOUTHSHAPE -- No --> MOUTHSCORE
     POSE --> DROOP
+    BODY --> ARM
+    ARM -- Yes --> NOLEAN --> SLUMP
+    ARM -- No --> SLUMP
+    BODY --> NODS
+    BODY --> STILL
   end
   BACK -- No --> CROP
   BACK -- No --> POSE
+  BACK -- No --> BODY
 
   %% ---------------- Sign detection ----------------
   subgraph SIGN["4 · SIGN DETECTION"]
     direction TB
-    SMOOTH["Rolling median over 5 frames<br/>(eyes · mouth · head)"]
-    MON["Sign monitors<br/>eyes closed ≥ 1.5 s · yawn held ≥ 2 s · head drooped ≥ 1.5 s<br/>or high average over a short window (PERCLOS)"]
-    SMOOTH --> MON
+    SMOOTH["Rolling median over 5 frames<br/>(eyes · mouth · head · body)"]
+    COUNTS{"Which signs count?<br/>(mode)"}
+    FACEM["face: eyes, yawn, head<br/>+ body signs only while the face is covered"]
+    BOTHM["both (default): face and body signs together"]
+    BODYM["body: body signs only<br/>(posture, nodding, leaning, stillness)<br/>no check-in"]
+    MON["Sign monitors<br/>eyes closed ≥ 1.5 s · yawn held ≥ 2 s · head drooped ≥ 1.5 s ·<br/>slumped ≥ 2 s · 3 nods in 60 s · still for 45 s<br/>or high average over a short window (PERCLOS)"]
+    BLIND{"Eyes unreadable for 60 s<br/>with a person in view?"}
+    ASK@{ shape: lean-r, label: "Check-in: one beep +<br/>'I'm awake (Space)' prompt" }
+    ANS{"Answered within 5 s?<br/>(Space / I'm awake button)"}
+    ANSOK["Log reaction time · restart the 60 s"]
+    NOANS["Sign: no check-in answer"]
+    SMOOTH --> COUNTS
+    COUNTS --> FACEM --> MON
+    COUNTS --> BOTHM --> MON
+    COUNTS --> BODYM --> MON
+    BLIND -- Yes --> ASK --> ANS
+    ANS -- Yes --> ANSOK
+    ANS -- No --> NOANS --> MON
   end
   EYESCORE --> SMOOTH
   MOUTHSCORE --> SMOOTH
   DROOP --> SMOOTH
+  SLUMP --> SMOOTH
+  NODS --> COUNTS
+  STILL --> COUNTS
   UNREAD --> SMOOTH
-  NOFACE --> SMOOTH
+  UNREAD --> BLIND
+  AWAY --> SMOOTH
 
   %% ---------------- Alert escalation ----------------
   subgraph ESC["5 · ALERT ESCALATION (state machine)"]
     direction TB
-    INVIEW{"Face in view?"}
+    INVIEW{"Person in view?"}
     HOLD["Hold current level<br/>pause the 30 s watch"]
     LEVEL{"Current level?"}
     NEWSIGN{"New sign?"}
     L0["Level 0 · NORMAL"]:::ok
     L1["Level 1 · WARNING<br/>start / restart 30 s watch"]:::warn
-    WORSE{"Sign repeats, a second sign appears,<br/>or it lasts (eyes 3 s · head 4 s)?<br/>Yawns alone: 3 within the watch"}
+    WORSE{"Sign repeats, a second sign appears,<br/>or it lasts (eyes 3 s · head 4 s · slumped 4 s ·<br/>still 30 s · no check-in answer 5 s)?<br/>Yawns alone: 3 within the watch"}
     OVER{"30 s watch over<br/>and no sign active?"}
     L2["Level 2 · CRITICAL"]:::alert
     CALM{"Calm for 5 s?"}
-    REC["Level 1 · WARNING (recovering)<br/>new 30 s watch"]:::warn
+    RECOV["Level 1 · WARNING (recovering)<br/>new 30 s watch"]:::warn
     INVIEW -- No --> HOLD
     INVIEW -- Yes --> LEVEL
     LEVEL -- 0 --> NEWSIGN
@@ -177,7 +242,7 @@ flowchart TD
     OVER -- Yes --> L0
     OVER -- No --> L1
     LEVEL -- 2 --> CALM
-    CALM -- Yes --> REC
+    CALM -- Yes --> RECOV
     CALM -- No --> L2
   end
   MON --> INVIEW
@@ -186,10 +251,10 @@ flowchart TD
   subgraph OUT["6 · OUTPUTS"]
     direction TB
     ALARMQ{"CRITICAL and not muted?"}
-    ALARMON@{ shape: lean-r, label: "Sound alarm (repeating beep)<br/>→ hardware: buzzer + strong LED" }
-    ALARMOFF["Alarm off<br/>(WARNING → hardware: soft LED)"]
-    LOG@{ shape: cyl, label: "Session log<br/>level, EAR, MAR, head angles,<br/>limits, events · every 0.25 s" }
-    SCREEN@{ shape: curv-trap, label: "Display: video with markers<br/>(eye, mouth & face brackets, head line)<br/>+ dashboard: alert level, signs, detection,<br/>calibration, live values, recent events" }
+    ALARMON@{ shape: lean-r, label: "Sound alarm (repeating beep)<br/>Pi: buzzer on GPIO 4 · PC: beep ·<br/>web: browser tone" }
+    ALARMOFF["Alarm off"]
+    LOG@{ shape: cyl, label: "Session log<br/>level / state, EAR, MAR, head angles,<br/>limits, events (incl. check-ins) · every 0.25 s" }
+    SCREEN@{ shape: curv-trap, label: "Display: video with markers<br/>(eye, mouth & face brackets, head line, shoulder line)<br/>+ dashboard: NORMAL / WARNING / CRITICAL /<br/>FACE COVERED / NO FACE / NO PERSON / CAMERA LOST,<br/>signs, detection, calibration, live values, events<br/>Desktop window · or browser page (--stream, Pi)" }
     ALARMQ -- Yes --> ALARMON --> LOG
     ALARMQ -- No --> ALARMOFF --> LOG
     LOG --> SCREEN
@@ -197,36 +262,42 @@ flowchart TD
   L0 --> ALARMQ
   L1 --> ALARMQ
   L2 --> ALARMQ
-  REC --> ALARMQ
+  RECOV --> ALARMQ
   HOLD --> ALARMQ
 
   %% ---------------- User controls ----------------
   subgraph CTRL["7 · USER CONTROLS"]
     direction TB
-    KEY@{ shape: sl-rect, label: "Key / button<br/>Q · M · E (web: Stop · Mute · Export)" }
+    KEY@{ shape: sl-rect, label: "Key / button<br/>Q · M · E · Space<br/>(web / Pi page: Stop · Mute · Export ·<br/>I'm awake · Shut down device)" }
     WHICH{"Which input?"}
     MUTE["Toggle mute"]
     EXPORT["Export session"]
-    REPORT@{ shape: docs, label: "Session report<br/>PNG graphs + CSV readings" }
+    AWAKE["Answer check-in"]
+    REPORT@{ shape: docs, label: "Session report<br/>PNG line graph + CSV log" }
+    SHUT["Power off the Pi<br/>(--allow-shutdown, after confirm)"]
     KEY --> WHICH
     WHICH -- M / Mute --> MUTE
     WHICH -- E / Export --> EXPORT --> REPORT
+    WHICH -- Space / I'm awake --> AWAKE
+    WHICH -- Shut down --> SHUT
   end
   SCREEN --> KEY
   WHICH -- None --> A2(("A"))
   MUTE --> A3(("A"))
   REPORT --> A4(("A"))
+  AWAKE --> A5(("A"))
   WHICH -- Q / Stop --> B1(("B"))
+  SHUT --> B4(("B"))
 
-  BIN(("B")) -- "B · shut down" --> CLEAN["Stop alarm · release camera · close trackers"]
+  BIN(("B")) -- "B · shut down" --> CLEAN["Stop alarm & buzzer · release camera ·<br/>close face & pose trackers"]
   STOP@{ shape: stadium, label: "End" }
   CLEAN --> STOP
 
   class START,STOP,C0,C14 term
-  class DS,MODELS,CFG,LOG store
-  class OPEN,CAMERR,C1,READ,ALARMON io
-  class CAL1,RECAL sub
-  class OPENED,BETTER,C4,C6,C7,C10,GOT,DARK,FOUND,FOUND2,BACK,DETAIL,EYECONF,YAWNCONF,INVIEW,LEVEL,NEWSIGN,WORSE,OVER,CALM,ALARMQ,WHICH dec
+  class DS,HID,REC,MODELS,CFG,LOG store
+  class OPEN,CAMERR,C1,READ,ALARMON,ASK io
+  class CAL1,RECAL,LOST sub
+  class MODE,OPENED,BETTER,C6,C7,C10,C15,GOT,DARK,FOUND,PERSON,BACK,DETAIL,EYEOK,EYEDEC,EYESHAPE,YAWNOK,MOUTHSHAPE,ARM,COUNTS,BLIND,ANS,INVIEW,LEVEL,NEWSIGN,WORSE,OVER,CALM,ALARMQ,WHICH dec
 
   %% ---------------- Photo analysis ----------------
   subgraph PHOTO["PHOTO ANALYSIS · predict &lt;image&gt; · web Upload / paste / click video to capture"]
@@ -238,7 +309,7 @@ flowchart TD
     PFOUND{"Face found?"}
     PRETRY["Coarser face detector → zoom → retry"]
     PFOUND2{"Face found?"}
-    PFEAT@{ shape: subproc, label: "Feature extraction<br/>(same as section 3)" }
+    PFEAT@{ shape: subproc, label: "Feature extraction<br/>(eyes, mouth, head as in section 3,<br/>blocked regions shown as not readable)" }
     PVERD{"Eyes closed, yawning<br/>or head drooped?"}
     PNOT@{ shape: curv-trap, label: "Show NOT ALERT + readings<br/>Original vs Scanned" }
     PALERT@{ shape: curv-trap, label: "Show ALERT + readings<br/>Original vs Scanned" }
@@ -257,7 +328,7 @@ flowchart TD
   class PIN io
   class PFEAT sub
   class PFOUND,PFOUND2,PVERD dec
-  class AIN,A1,A2,A3,A4,BIN,B1,B2,B3 conn
+  class AIN,A0,A1,A2,A3,A4,A5,BIN,B1,B3,B4 conn
 
   %% Invisible links that only set the reading order of detached blocks.
   RECAL ~~~ C0
