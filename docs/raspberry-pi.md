@@ -1,5 +1,7 @@
 # WATCH on a Raspberry Pi
 
+*Last update: 13 November 2026*
+
 How to run the live monitor on a Raspberry Pi with a camera module and watch it from a browser on a laptop. The Pi needs no screen.
 
 Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie) and a Camera Module 3 NoIR. In the default **both** mode it runs at about 4 to 6 FPS with a face in view, and about 8 to 10 FPS in **body** mode.
