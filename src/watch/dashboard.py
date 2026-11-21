@@ -26,7 +26,7 @@ MARGIN, GAP, PAD, HEADER = 16, 16, 12, 52
 VIDEO_W, VIDEO_H, CONTROLS_H = 640, 480, 34
 DASH_W, DASH_PAD, COLUMN_GAP, ROW = 560, 16, 24, 20
 # Rows in the left dashboard column: 4 signs, 8 detection checks and 6 calibration values.
-DASH_ROWS = 18
+DASH_ROWS = 20
 CREDITS = ("Property of Prince Herrera, Ormin Cariaso,", "John Casili, Christenzien Lalimo")
 
 _FONT_FILES = {
@@ -57,6 +57,37 @@ class Level:
     color: tuple
     reason: str = ""
     timer: str = ""
+
+
+def _hex(color) -> str:
+    return "transparent" if color is None else "#{:02x}{:02x}{:02x}".format(*color)
+
+
+@dataclass
+class WebFrame:
+    image: np.ndarray
+    state: dict
+
+
+class WebView:
+    def render(self, frame_bgr, level: Level, signs, checks, calibration, events, live: bool, muted: bool, readings=(), notice="") -> WebFrame:
+        def rows(items):
+            return [{"dot": _hex(row.color), "label": row.label, "value": row.value, "color": _hex(row.value_color), "extra": row.extra} for row in items]
+
+        return WebFrame(
+            frame_bgr,
+            {
+                "level": {"name": level.name, "color": _hex(level.color), "reason": level.reason, "timer": level.timer, "dark": level.color == YELLOW},
+                "signs": rows(signs),
+                "checks": rows(checks),
+                "calibration": rows(calibration),
+                "live": rows(readings),
+                "events": [{"text": text, "color": _hex(color)} for text, color in events],
+                "monitoring": live,
+                "muted": muted,
+                "notice": notice,
+            },
+        )
 
 
 class DashboardView:

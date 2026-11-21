@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from watch.body import BodyPose, body_slump, shoulders
 
-SETTINGS = {"drop_limit": 0.5, "lean_limit_deg": 20.0, "head_drop_limit": 0.25, "forward_limit": 0.2}
+SETTINGS = {"drop_limit": 0.5, "lean_limit_deg": 20.0, "head_drop_limit": 0.25, "forward_limit": 0.2, "upright_rise": 0.02}
 BASE = BodyPose(center_x=320, center_y=400, width=200, tilt=2.0, head=-0.6)
 
 
@@ -72,3 +72,15 @@ def test_arm_counts_as_raised_when_a_wrist_or_elbow_is_above_its_shoulder():
     assert shoulders(landmarks, 640, 480, 0.5).arm_raised
     landmarks[16] = SimpleNamespace(x=0.4, y=0.3, visibility=0.1)
     assert not shoulders(landmarks, 640, 480, 0.5).arm_raised
+
+
+def test_sitting_up_straight_with_wider_shoulders_is_not_a_slump():
+    assert body_slump(BodyPose(320, 380, 250, 2.0), BASE, SETTINGS)[0] == 0.0
+    assert body_slump(BodyPose(320, 400, 250, 2.0), BASE, SETTINGS)[0] == 1.0
+
+
+def test_shoulders_rising_toward_the_head_is_not_a_head_drop():
+    raised = BodyPose(320, 340, 200, 2.0, head=-0.3)
+    assert body_slump(raised, BASE, SETTINGS)[3] == 0.0
+    sunk = BodyPose(320, 400, 200, 2.0, head=-0.3)
+    assert body_slump(sunk, BASE, SETTINGS)[3] > 0.25

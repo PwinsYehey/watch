@@ -69,10 +69,14 @@ def body_slump(pose: BodyPose, baseline: BodyPose, settings: dict) -> tuple[floa
     forward lean as the fraction the shoulders look wider) against the calibrated posture."""
     drop = max(0.0, (pose.center_y - baseline.center_y) / baseline.width)
     lean = abs(pose.tilt - baseline.tilt)
-    head_drop = max(0.0, pose.head - baseline.head) if pose.head is not None and baseline.head is not None else None
+    head_drop = None
+    if pose.head is not None and baseline.head is not None:
+        sunk = (pose.center_y + pose.head * pose.width - baseline.center_y - baseline.head * baseline.width) / baseline.width
+        head_drop = max(0.0, min(pose.head - baseline.head, sunk))
     # A raised arm tilts the shoulders, so the lean is ignored while one is up.
     counted_lean = 0.0 if pose.arm_raised else lean
     # Slumping toward the camera brings the shoulders closer, so they look wider.
-    forward = max(0.0, pose.width / baseline.width - 1.0)
+    rise = (baseline.center_y - pose.center_y) / baseline.width
+    forward = 0.0 if rise > settings["upright_rise"] else max(0.0, pose.width / baseline.width - 1.0)
     score = max(drop / settings["drop_limit"], counted_lean / settings["lean_limit_deg"], (head_drop or 0.0) / settings["head_drop_limit"], forward / settings["forward_limit"])
     return min(1.0, score), drop, lean, head_drop, forward

@@ -204,3 +204,20 @@ def test_escalation_knows_the_body_cues():
     config = load_config()["escalation"]
     for cue in ("nodding", "still"):
         assert cue in config["persist_sec"] and cue in config["repeat_count"]
+
+
+def test_critical_clears_once_alert_even_while_nod_and_stillness_history_lingers():
+    monitor = EscalationMonitor(30.0, 5.0, {"eyes": 3.0, "nodding": None, "still": 30.0}, {"eyes": 2, "nodding": 2, "still": 2})
+
+    def statuses(eyes=0.0, nodding=False, still=0.0):
+        return {
+            "eyes": AlertnessStatus("not_alert" if eyes else "alert", eyes, 0.0),
+            "nodding": AlertnessStatus("not_alert" if nodding else "alert", 0.0, 0.0),
+            "still": AlertnessStatus("not_alert" if still else "alert", still, 0.0),
+        }
+
+    assert monitor.update(statuses(eyes=3.5, nodding=True, still=40.0), True, 0.0).level == 2
+    assert monitor.update(statuses(nodding=True, still=41.0), True, 1.0).level == 2
+    assert monitor.update(statuses(nodding=True, still=46.0), True, 6.0).reason == "recovering"
+    assert monitor.update(statuses(nodding=True, still=50.0), True, 10.0).level == 1
+    assert monitor.update(statuses(), True, 40.0).level == 0

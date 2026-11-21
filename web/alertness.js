@@ -113,6 +113,8 @@ class CheckInMonitor {
   }
 }
 
+const HISTORY_CUES = ["nodding", "still"];
+
 class EscalationMonitor {
   constructor({ windowSec, calmSec, persistSec, repeatCount }) {
     this.window = windowSec;
@@ -126,6 +128,7 @@ class EscalationMonitor {
     this.windowEnd = 0.0;
     this.calmSince = null;
     this.last = null;
+    this.held = new Set();
   }
 
   update(statuses, facePresent, now) {
@@ -143,14 +146,16 @@ class EscalationMonitor {
       if (status.state !== "no_face") this.active[cue] = status.state === "not_alert";
     }
     this.events.push(...newEvents);
+    this.held = new Set([...this.held].filter((cue) => concerning.includes(cue)));
 
     if (this.level === 2) {
-      if (concerning.length) this.calmSince = null;
+      if (concerning.some((cue) => !HISTORY_CUES.includes(cue))) this.calmSince = null;
       else if (this.calmSince === null) this.calmSince = now;
       else if (now - this.calmSince >= this.calm) {
         this.level = 1;
         this.reason = "recovering";
         this.windowEnd = now + this.window;
+        this.held = new Set(concerning);
       }
       return this._status(now);
     }
@@ -165,10 +170,11 @@ class EscalationMonitor {
       if (reason) return this._critical(reason, now);
     }
     if (this.level === 1) {
-      for (const cue of concerning) {
+      const current = concerning.filter((cue) => !this.held.has(cue));
+      for (const cue of current) {
         if (this.persist[cue] !== null && statuses[cue].closedDuration >= this.persist[cue]) return this._critical(`${CUE_LABELS[cue]} too long`, now);
       }
-      if (!concerning.length && now >= this.windowEnd) {
+      if (!current.length && now >= this.windowEnd) {
         this.level = 0;
         this.reason = "";
         this.events = [];
