@@ -118,10 +118,11 @@ body:
   min_visibility: 0.5
   # Slumped once the shoulders drop this many shoulder widths, the shoulder line tilts this far past calibration,
   # the head drops this far toward the shoulders, or the shoulders look this much wider from leaning toward the camera.
-  drop_limit: 0.10
-  lean_limit_deg: 10.0
-  head_drop_limit: 0.25
-  forward_limit: 0.20
+  drop_limit: 0.06
+  lean_limit_deg: 6.0
+  head_drop_limit: 0.15
+  forward_limit: 0.12
+  upright_rise: 0.02
   # A nod is the head dropping nod_drop shoulder widths and coming back up within nod_max_sec; nods_limit nods within
   # nods_window_sec means nodding off.
   nod_drop: 0.12
@@ -174,11 +175,13 @@ live:
   # face: the face, with body language only once the face is covered.
   mode: both
   min_cnn_confidence: 0.65
+  covered_mouth_yawn: 0.8
+  eye_blur: 3
   # shape_gate: the CNN counts only when the eye shape also looks closed. cnn: the CNN decides alone,
   # for a model fine-tuned on recordings through tinted lenses, where the eye shape is a guess.
   eye_decision: cnn
   ear_glare_tolerance: 0.15
-  low_detail_std: 12.0
+  low_detail_std: 8.0
   # Frames darker than low_light_mean are brightened to low_light_target.
   low_light_mean: 0.3
   low_light_target: 0.45

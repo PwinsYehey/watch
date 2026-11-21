@@ -188,6 +188,9 @@ class EscalationStatus:
     window_left: float
 
 
+HISTORY_CUES = ("nodding", "still")
+
+
 class EscalationMonitor:
     """One cue event warns; a repeat, a second cue, or a persisting event within the window escalates to critical."""
 
@@ -202,6 +205,7 @@ class EscalationMonitor:
         self._window_end = 0.0
         self._calm_since: float | None = None
         self._last: float | None = None
+        self._held: set[str] = set()
 
     def update(self, statuses: dict[str, AlertnessStatus], face_present: bool, now: float) -> EscalationStatus:
         elapsed = now - self._last if self._last is not None else 0.0
@@ -218,15 +222,17 @@ class EscalationMonitor:
             if status.state != "no_face":
                 self._active[cue] = status.state == "not_alert"
         self._events += new_events
+        self._held &= set(concerning)
 
         if self.level == 2:
-            if concerning:
+            if any(cue not in HISTORY_CUES for cue in concerning):
                 self._calm_since = None
             elif self._calm_since is None:
                 self._calm_since = now
             elif now - self._calm_since >= self.calm:
                 self.level, self.reason = 1, "recovering"
                 self._window_end = now + self.window
+                self._held = set(concerning)
             return self._status(now)
 
         if new_events:
@@ -236,10 +242,11 @@ class EscalationMonitor:
             if reason := self._repeated_or_combined():
                 return self._critical(reason, now)
         if self.level == 1:
-            for cue in concerning:
+            current = [cue for cue in concerning if cue not in self._held]
+            for cue in current:
                 if self.persist[cue] is not None and statuses[cue].closed_duration >= self.persist[cue]:
                     return self._critical(f"{CUE_LABELS[cue]} too long", now)
-            if not concerning and now >= self._window_end:
+            if not current and now >= self._window_end:
                 self.level, self.reason = 0, ""
                 self._events.clear()
         return self._status(now)

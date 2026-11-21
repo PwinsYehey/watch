@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WATCH - Live Alertness Monitoring</title>
+  <link rel="icon" href="favicon.svg?v=2" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
+  <meta name="theme-color" content="#161920" />
+  <link rel="stylesheet" href="style.css?v=1" />
+  <style>
+    .stage { aspect-ratio: 4 / 3; }
+    .stage img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .stage img:not([src]) { visibility: hidden; }
+    #output.capturable { cursor: pointer; }
+    .btn-danger { border-color: #dc0000; color: #ff4d4d; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <div>
+        <div class="brand-name">W.A.T.C.H</div>
+        <div class="brand-sub">Wakefulness Assessment through Tracking of Cues &amp; Head</div>
+      </div>
+    </div>
+    <div class="credits">Property of Prince Herrera, Ormin Cariaso,<br />John Casili, Christenzien Lalimo</div>
+  </header>
+
+  <main class="layout">
+    <section class="card viewer">
+      <div class="viewer-grid">
+        <div id="originalPanel" hidden>
+          <div class="panel-label">Original</div>
+          <div class="stage"><img id="originalOutput" alt="Original photo" /></div>
+        </div>
+        <div>
+          <div class="panel-label" id="scannedLabel" hidden>Scanned</div>
+          <div class="stage">
+            <img id="output" alt="Live camera" />
+            <div class="placeholder" id="placeholder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>
+              <strong>No video yet</strong>
+              <span>Start the camera, or upload or paste a photo.</span>
+            </div>
+            <div id="flashOverlay"></div>
+          </div>
+          <p class="capture-hint" id="captureHint" hidden>Click the video to capture a photo for detailed analysis.</p>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="startBtn">
+          <svg class="btn-icon" id="cameraIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>
+          <span class="live-dot" id="liveDot" hidden></span>
+          <span id="startBtnLabel">Use camera</span>
+        </button>
+        <label for="imageUpload" class="btn" id="uploadBtn">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+          Upload
+        </label>
+        <button class="btn" id="muteBtn" hidden>Mute Alarm</button>
+        <button class="btn btn-primary" id="checkInBtn" hidden>I'm awake (Space)</button>
+        <button class="btn" id="exportBtn" hidden>
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>
+          Export
+        </button>
+        <button class="btn btn-danger" id="shutdownBtn" hidden>Shut down device</button>
+        <input type="file" id="imageUpload" accept="image/*" />
+        <span class="hint">or paste an image (Ctrl+V)</span>
+      </div>
+      <div id="status"></div>
+    </section>
+
+    <aside class="card dashboard" id="dashboard" data-tab="detection" hidden>
+      <div class="dash-body">
+        <section class="dash-section" data-section="level">
+          <div class="dash-label">Alert level</div>
+          <div class="dash-level" id="dashLevel">
+            <div class="dash-level-name" id="dashLevelName">STARTING</div>
+            <div id="dashLevelReason">Getting the camera ready</div>
+            <div class="dash-level-timer" id="dashLevelTimer"></div>
+          </div>
+        </section>
+        <section class="dash-section" data-section="signs">
+          <div class="dash-label">Signs</div>
+          <div class="dash-rows" id="dashSigns"></div>
+        </section>
+        <section class="dash-section dash-tab" data-section="detection">
+          <div class="dash-label">Detection</div>
+          <div class="dash-rows" id="dashChecks"></div>
+        </section>
+        <section class="dash-section dash-tab" data-section="calibration">
+          <div class="dash-label">Calibration</div>
+          <div class="dash-rows" id="dashCalibration"></div>
+        </section>
+        <section class="dash-section dash-tab" data-section="events">
+          <div class="dash-label">Recent events</div>
+          <div class="dash-events-wrap"><ol class="dash-events" id="dashEvents"><li class="dim">none yet</li></ol></div>
+        </section>
+        <section class="dash-section dash-tab" data-section="live">
+          <div class="dash-label">Live values</div>
+          <div class="dash-rows" id="dashLive"></div>
+        </section>
+      </div>
+      <div class="dash-tabs" role="tablist">
+        <button role="tab" data-tab="detection" aria-selected="true">Detection</button>
+        <button role="tab" data-tab="calibration" aria-selected="false">Calibration</button>
+        <button role="tab" data-tab="live" aria-selected="false">Live</button>
+        <button role="tab" data-tab="events" aria-selected="false">Events</button>
+      </div>
+    </aside>
+  </main>
+
+  <footer>Property of Prince Herrera, Ormin Cariaso, John Casili, Christenzien Lalimo</footer>
+
+  <script src="pi.js?v=3"></script>
+</body>
+</html>

@@ -7,140 +7,21 @@ import socket
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import cv2
 
+from watch.dashboard import WebFrame
+
 NO_KEY = 0xFF
 # Page key to monitor key; "a" answers a check-in, which the desktop window takes as the space bar.
-KEYS = {"q": "q", "m": "m", "e": "e", "a": " "}
+KEYS = {"q": "q", "m": "m", "e": "e", "a": " ", "p": "p"}
+WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+FILES = {"/": "pi.html", "/pi.js": "pi.js", "/style.css": "style.css", "/favicon.svg": "favicon.svg", "/apple-touch-icon.png": "apple-touch-icon.png"}
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".csv": "text/csv"}
+MAX_UPLOAD = 20 * 1024 * 1024
 SHUTDOWN_COMMAND = ("systemctl", "poweroff")
 
-PAGE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WATCH - Live Alertness Monitoring</title>
-<style>
-  body { margin: 0; background: #0e1014; color: #e7e9ee; font: 13px system-ui, sans-serif; text-align: center; }
-  img { display: block; margin: 0 auto; max-width: 100%; height: auto; }
-  nav { padding: 12px; }
-  button { margin: 0 4px; padding: 8px 14px; border: 1px solid #272c36; border-radius: 8px; background: #1d212a; color: inherit; font: inherit; cursor: pointer; }
-  button.on { border-color: #00c800; color: #00c800; }
-  #shutdown { border-color: #dc0000; color: #ff4d4d; }
-  details { max-width: 760px; margin: 0 auto 24px; padding: 0 16px; text-align: left; line-height: 1.6; }
-  summary { cursor: pointer; padding: 10px 0; font-weight: 600; color: #9fb4ff; }
-  details h3 { margin: 18px 0 4px; font-size: 14px; }
-  details ul, details ol { margin: 4px 0; padding-left: 20px; }
-  details code { color: #9fb4ff; }
-  details .note { color: #a7adb8; }
-</style>
-</head>
-<body>
-<img src="/stream" alt="Live monitor">
-<nav>
-  <button id="sound">Enable alarm sound</button>
-  <button data-key="a">I'm awake (Space)</button>
-  <button data-key="m">Mute / unmute alarm (M)</button>
-  <button data-key="e">Export report (E)</button>
-  <button data-key="q">Stop monitor (Q)</button>
-  <button id="shutdown" hidden>Shut down device</button>
-</nav>
-<p id="message"></p>
-<details>
-  <summary>How to use WATCH</summary>
-
-  <h3>Starting</h3>
-  <ol>
-    <li>Plug in the Pi. The monitor starts by itself and this page loads after 1 to 2 minutes.</li>
-    <li>Open this page from a device on the same network, or over a cable straight to the Pi.</li>
-    <li>For the first 5 seconds, while it says <b>CALIBRATING</b>, look at the camera normally with your eyes open and <b>without sunglasses</b>. It learns your face from this.</li>
-    <li>Then put on sunglasses or a visor if you need them.</li>
-  </ol>
-  <p class="note">If it starts while your eyes are hidden, it keeps safe default settings instead of learning wrong ones. Step out of view for 3 seconds and come back to calibrate again.</p>
-
-  <h3>Alert levels</h3>
-  <ul>
-    <li><b>NORMAL</b>: eyes, mouth and head look alert.</li>
-    <li><b>WARNING</b>: one sign showed up, such as eyes closed, a yawn or the head dropping. It watches for a while.</li>
-    <li><b>CRITICAL</b>: the sign lasted or came back. The buzzer beeps until it clears.</li>
-    <li><b>NO FACE DETECTED</b>: nobody is in view. <b>CAMERA LOST</b>: the camera stopped, and the buzzer sounds after 3 seconds.</li>
-    <li><b>CHECK-IN</b>: the eyes have been unreadable for about a minute, such as behind a dark visor. It beeps once; press <b>I'm awake</b> or the space bar within 5 seconds, or it raises the alert. Head and body posture are still watched meanwhile.</li>
-  </ul>
-
-  <h3>Buttons</h3>
-  <ul>
-    <li><b>Enable alarm sound</b>: also beeps on this device. Browsers need one click before they can play sound.</li>
-    <li><b>I'm awake (Space)</b>: answers a check-in.</li>
-    <li><b>Mute / unmute alarm (M)</b>: silences the buzzer and this page.</li>
-    <li><b>Export report (E)</b>: saves a report of the session on the Pi.</li>
-    <li><b>Stop monitor (Q)</b>: restarts the monitor, which starts again by itself.</li>
-    <li><b>Shut down device</b>: always use this before unplugging. Pulling the power while it runs can damage the SD card.</li>
-  </ul>
-
-  <h3>Best results</h3>
-  <ul>
-    <li>Use a lit room. In a fully dark room one IR light is not enough to see through tinted lenses.</li>
-    <li>Keep the whole face in view, chin included, at about arm's length.</li>
-    <li>Put the IR light beside the camera, aimed at the face, and cover its small light sensor with black tape so it stays on instead of flickering.</li>
-    <li>Keep the Pi on a hard surface, not on cloth, so it does not overheat.</li>
-  </ul>
-
-  <h3>What's new</h3>
-  <ul>
-    <li><b>Buzzer</b> on the Pi. It beeps at CRITICAL and goes quiet when the monitor stops. Wiring on the top pin row, counted from the corner hole: VCC on the 1st pin, I/O on the 4th, GND on the 5th.</li>
-    <li><b>Sunglasses</b>: the camera is brighter and a contrast filter lifts the eye area, so eyes show through tinted lenses under IR.</li>
-    <li><b>Sunglasses mode</b> (<code>eye_decision: cnn</code>): the eye model decides open or closed, since behind lenses the eye outline is a guess. It is off by default; switch it on after fine-tuning the eye model on your own recordings.</li>
-    <li><b>Hidden eyes</b>: the eye model also recognises eyes it cannot see, such as behind a dark visor, and asks for a check-in instead of guessing.</li>
-    <li><b>Body posture</b>: dropping or tilting shoulders count as a sign too, so it keeps watching when the face is covered.</li>
-    <li><b>Training on your own recordings</b> with <code>watch record</code> and <code>watch finetune</code>, run on the Pi over SSH. The buzzer cues each part: one beep open, two beeps closed, a long beep done. See <code>docs/raspberry-pi.md</code>.</li>
-  </ul>
-</details>
-<script>
-  const send = (key) => fetch("/key/" + key, { method: "POST" });
-  document.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => send(button.dataset.key)));
-  document.addEventListener("keydown", (event) => {
-    const key = event.key === " " ? "a" : event.key.toLowerCase();
-    if ("qmea".includes(key)) {
-      event.preventDefault();
-      send(key);
-    }
-  });
-
-  // Browsers only play sound after a click, so the alarm has to be switched on once.
-  let audio = null;
-  const sound = document.getElementById("sound");
-  sound.addEventListener("click", () => {
-    audio = audio || new AudioContext();
-    audio.resume();
-    sound.textContent = "Alarm sound on";
-    sound.classList.add("on");
-  });
-  function beep() {
-    const tone = audio.createOscillator();
-    tone.frequency.value = 880;
-    tone.connect(audio.destination);
-    tone.start();
-    tone.stop(audio.currentTime + 0.25);
-  }
-  const shutdown = document.getElementById("shutdown");
-  const message = document.getElementById("message");
-  shutdown.addEventListener("click", async () => {
-    if (!confirm("Shut down the device? It has to be unplugged and plugged back in to start again.")) return;
-    const response = await fetch("/shutdown", { method: "POST" });
-    message.textContent = response.ok ? "Shutting down. Wait for the green light to stop blinking, then unplug the power." : "Could not shut down: " + (await response.text());
-  });
-  setInterval(async () => {
-    try {
-      const state = await (await fetch("/state")).json();
-      shutdown.hidden = !state.shutdown;
-      if (state.alarm && audio) beep();
-    } catch (error) {}
-  }, 500);
-</script>
-</body>
-</html>
-"""
 
 
 class _Server(http.server.ThreadingHTTPServer):
@@ -171,17 +52,21 @@ class Window:
 class BrowserStream:
     """The same view as an MJPEG stream on a web page, with keys sent back from the page."""
 
-    def __init__(self, port: int, alarm_active, allow_shutdown: bool = False):
-        self._view, self._count = None, 0
+    def __init__(self, port: int, status, allow_shutdown: bool = False, analyze=None, sessions: Path | None = None):
+        self._view, self._count, self._state = None, 0, None
         self._allow_shutdown = allow_shutdown
         self._updated = threading.Condition()
         self._keys = queue.SimpleQueue()
-        self._alarm_active = alarm_active
+        self._status = status
+        self._analyze = analyze
+        self._sessions = sessions
         self._server = _Server(("::", port), self._handler())
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
         print(f"Serving the live monitor at http://{socket.gethostname()}.local:{port} (Ctrl+C to stop)", flush=True)
 
     def show(self, view, wait_ms: int) -> int:
+        if isinstance(view, WebFrame):
+            view, self._state = view.image, view.state
         with self._updated:
             self._view, self._count = view, self._count + 1
             self._updated.notify_all()
@@ -223,12 +108,24 @@ class BrowserStream:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _file(self, path: Path):
+                self._send(200, TYPES.get(path.suffix, "application/octet-stream"), path.read_bytes())
+
             def do_GET(self):
-                if self.path == "/":
-                    self._send(200, "text/html; charset=utf-8", PAGE.encode())
-                elif self.path == "/state":
-                    self._send(200, "application/json", json.dumps({"alarm": bool(stream._alarm_active()), "shutdown": stream._allow_shutdown}).encode())
-                elif self.path == "/stream":
+                path = self.path.split("?")[0]
+                if path in FILES and (WEB_DIR / FILES[path]).is_file():
+                    self._file(WEB_DIR / FILES[path])
+                elif path == "/state":
+                    state = {**stream._status(), "shutdown": stream._allow_shutdown, "view": stream._state}
+                    self._send(200, "application/json", json.dumps(state).encode())
+                elif path.startswith("/sessions/") and stream._sessions is not None:
+                    name = Path(path.removeprefix("/sessions/")).name
+                    target = stream._sessions / name
+                    if name.startswith("watch-session-") and target.is_file():
+                        self._file(target)
+                    else:
+                        self._send(404)
+                elif path == "/stream":
                     self.send_response(200)
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                     self.send_header("Cache-Control", "no-store")
@@ -246,6 +143,17 @@ class BrowserStream:
                 if self.path.startswith("/key/") and key in KEYS:
                     stream._keys.put(KEYS[key])
                     self._send(204)
+                elif self.path.split("?")[0] == "/analyze" and stream._analyze is not None:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    if length > MAX_UPLOAD:
+                        self._send(413)
+                        return
+                    data = self.rfile.read(length) if length else None
+                    result = stream._analyze(data)
+                    if result is None:
+                        self._send(400, body=b"could not read that image")
+                    else:
+                        self._send(200, "application/json", json.dumps(result).encode())
                 elif self.path == "/shutdown" and stream._allow_shutdown:
                     result = subprocess.run(SHUTDOWN_COMMAND, capture_output=True, text=True)
                     if result.returncode == 0:

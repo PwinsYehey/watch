@@ -1,3 +1,4 @@
+import base64
 import shutil
 import statistics
 import subprocess
@@ -5,6 +6,7 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -20,6 +22,7 @@ from watch.model import Classifier
 from watch.stream import BrowserStream, Window
 
 WINDOW = "WATCH - Live Alertness Monitoring"
+THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
 # Marker colours on the video, as BGR.
 GREEN, RED, AMBER, MAGENTA, ORANGE, GRAY = (0, 200, 0), (0, 0, 220), (255, 200, 0), (255, 0, 200), (0, 140, 255), (150, 150, 150)
 EYE_CONTOURS = {"left": FACE_MESH.FACEMESH_RIGHT_EYE, "right": FACE_MESH.FACEMESH_LEFT_EYE}
@@ -78,6 +81,37 @@ def ear_thresholds(ears: list[float], settings: dict) -> dict | None:
     if baseline < settings["min_open_ear"]:
         return None
     return {"open_threshold": baseline, "closed_threshold": baseline - settings["closed_offset"]}
+
+
+def cpu_temperature() -> float | None:
+    try:
+        return int(THERMAL_ZONE.read_text()) / 1000
+    except (OSError, ValueError):
+        return None
+
+
+def _fit(image, width: int = 640, height: int = 480):
+    scale = min(width / image.shape[1], height / image.shape[0])
+    resized = cv2.resize(image, (max(1, int(image.shape[1] * scale)), max(1, int(image.shape[0] * scale))))
+    canvas = np.zeros((height, width, 3), np.uint8)
+    y, x = (height - resized.shape[0]) // 2, (width - resized.shape[1]) // 2
+    canvas[y : y + resized.shape[0], x : x + resized.shape[1]] = resized
+    return canvas
+
+
+def _status_panel(image, lines):
+    if not lines:
+        return
+    top = 88
+    region = image[top : top + len(lines) * 22 + 10, 10:330]
+    region[:] = (region * 0.45).astype(np.uint8)
+    for i, (text, color) in enumerate(lines):
+        cv2.putText(image, text, (18, top + 22 * (i + 1) - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+
+def _data_url(image) -> str:
+    ok, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return "data:image/jpeg;base64," + base64.b64encode(jpeg.tobytes()).decode()
 
 
 class _Quit(Exception):
@@ -161,8 +195,11 @@ class LiveMonitor:
         body_settings = {**config["body"], "every_n_frames": config["body"]["body_mode_every_n_frames"]} if self.body_only else config["body"]
         self.body_tracker, self.body_base = BodyTracker(body_settings), None
         self.alarm = Alarm(self.settings.get("buzzer_gpio"))
-        self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self.alarm.is_active, allow_shutdown)
-        self.view = ui.DashboardView()
+        sessions = config["paths"]["results_dir"] / "sessions"
+        self.display = Window(WINDOW) if stream_port is None else BrowserStream(stream_port, self._status, allow_shutdown, self.analyze, sessions)
+        self.view = ui.DashboardView() if stream_port is None else ui.WebView()
+        self.paused = False
+        self._export = None
         self.events = deque(maxlen=50)
         self.calibrated = False
         self.muted = False
@@ -200,6 +237,15 @@ class LiveMonitor:
             self.export()
         if key == ord(" "):
             self._answered = True
+        if key == ord("p"):
+            self.paused = not self.paused
+
+    def _status(self):
+        return {"alarm": bool(self.alarm.is_active()), "paused": self.paused, "check_in": bool(getattr(self, "check_in", None) and self.check_in.asking), "export": self._export}
+
+    def _paused_view(self):
+        level = ui.Level("PAUSED", ui.GRAY, "camera stopped")
+        return self.view.render(np.zeros((480, 640, 3), np.uint8), level, [], [], [], self._event_lines(), live=False, muted=self.muted, readings=[])
 
     def _camera_lost(self):
         lost_since, next_retry = time.time(), 0.0
@@ -287,12 +333,20 @@ class LiveMonitor:
         closedness = self.smoothers[side].add(eye_closedness(shape_closed, glare, cnn_closed, self.settings["eye_decision"]))
         return {"score": closedness, "label": "closed" if closedness >= 0.5 else "open", "ratio": eye.ratio}
 
+    def _soften(self, crop):
+        size = self.settings["eye_blur"]
+        return cv2.GaussianBlur(crop, (size, size), 0) if size > 1 else crop
+
     def _mouth(self, mouth):
         label, confidence, cnn_open = self.yawn_model.predict(mouth.crop)
-        if label == "blocked" or confidence < self.settings["min_cnn_confidence"]:
+        if label == "blocked":
             return None
         mar = self.config["mar"]
-        if cnn_open >= 0.5 and mouth.ratio < mar["closed_threshold"]:
+        if mouth.ratio < mar["closed_threshold"]:
+            if cnn_open >= self.settings["covered_mouth_yawn"]:
+                return None
+            return {"score": 0.0, "label": "no yawn", "ratio": mouth.ratio}
+        if confidence < self.settings["min_cnn_confidence"]:
             return None
         openness = max(cnn_open, linear_score(mouth.ratio, mar["closed_threshold"], mar["open_threshold"]))
         return {"score": openness, "label": "yawn" if openness >= 0.5 else "no yawn", "ratio": mouth.ratio}
@@ -319,6 +373,12 @@ class LiveMonitor:
         return {"score": droop, "label": label, "pitch": pitch, "roll": roll}
 
     def _draw(self, frame, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
+        self._overlay(frame, regions, cues)
+        level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness, sharpness)
+        notice = "CHECK-IN: press SPACE" if self.check_in.asking else self._notice if time.time() < self._notice_until else ""
+        return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings, notice=notice)
+
+    def _overlay(self, frame, regions, cues):
         h, w = frame.shape[:2]
 
         def point(i):
@@ -359,9 +419,43 @@ class LiveMonitor:
             for p in (left, right):
                 cv2.circle(frame, p, 6, color, -1, cv2.LINE_AA)
 
-        level, signs, checks, calibration, readings = self._dashboard(regions, cues, escalation, statuses, fps, brightness, sharpness)
-        notice = "CHECK-IN: press SPACE" if self.check_in.asking else self._notice if time.time() < self._notice_until else ""
-        return self.view.render(frame, level, signs, checks, calibration, self._event_lines(), live=True, muted=self.muted, readings=readings, notice=notice)
+    def analyze(self, data=None):
+        if self.body_only:
+            return None
+        if data is None:
+            if self._last_frame is None:
+                return None
+            original = self._last_frame.copy()
+            image, mirrored = original.copy(), True
+        else:
+            decoded = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if decoded is None:
+                return None
+            original = _fit(decoded)
+            image, mirrored = cv2.flip(original, 1), False
+        with FaceTracker(static_image_mode=True) as tracker:
+            regions = tracker.extract(image)
+        lines, cues = [], {}
+        if regions:
+            predictions = self.eye_model.predict_many([self._soften(eye.crop) for eye in regions.eyes.values()]) if regions.eyes else []
+            for (side, eye), (label, confidence, closed) in zip(regions.eyes.items(), predictions):
+                if label == "blocked" or confidence < self.settings["min_cnn_confidence"]:
+                    lines.append((f"{side} eye: not readable", GRAY))
+                    continue
+                cues[side] = {"label": "closed" if closed >= 0.5 else "open", "score": closed, "ratio": eye.ratio}
+                lines.append((f"{side} eye: {cues[side]['label']} {closed:.0%} | EAR {eye.ratio:.2f}", RED if closed >= 0.5 else GREEN))
+            cues["mouth"] = self._mouth(regions.mouth) if regions.mouth else None
+            if mouth := cues["mouth"]:
+                lines.append((f"mouth: {mouth['label']} {mouth['score']:.0%} | MAR {mouth['ratio']:.2f}", RED if mouth["label"] == "yawn" else AMBER))
+            else:
+                lines.append(("mouth: not readable", GRAY))
+            cues["head"] = self._head(regions.pitch, regions.roll)
+            if head := cues["head"]:
+                lines.append((f"head: {head['label']} | pitch {head['pitch']:.1f} | roll {head['roll']:.1f} deg", MAGENTA if head["label"] == "upright" else RED))
+            self._overlay(image, regions, cues)
+        scanned = image if mirrored else cv2.flip(image, 1)
+        _status_panel(scanned, lines if regions else [("NO FACE DETECTED", RED)])
+        return {"face": regions is not None, "original": _data_url(original), "scanned": _data_url(scanned)}
 
     def _dashboard(self, regions, cues, escalation, statuses, fps, brightness, sharpness=None):
         """The dashboard contents, mirroring updateDashboard and showCalibration in web/app.js."""
@@ -399,6 +493,8 @@ class LiveMonitor:
             ui.Row(ui.GREEN if fps >= 15 else ui.YELLOW, "FPS", f"{fps:.0f}"),
             ui.Row(ui.GREEN, "Device", "CPU"),
         ]
+        if (temperature := self._temperature()) is not None:
+            checks.append(ui.Row(ui.GREEN if temperature < 60 else ui.YELLOW if temperature < 75 else ui.RED, "Temperature", f"{temperature:.0f} \u00b0C"))
         for row in checks:
             row.value_color = ui.MUTED if row.color == ui.GRAY else row.color
 
@@ -420,9 +516,16 @@ class LiveMonitor:
             ("Body drop", f"{body['drop'] * 100:.0f}%" if body and body["drop"] is not None else "-", bool(body) and body["drop"] is not None and body["drop"] >= self.config["body"]["drop_limit"]),
             ("Body lean", f"{body['lean']:.1f}\u00b0" if body and body["lean"] is not None else "-", bool(body) and body["lean"] is not None and body["lean"] >= self.config["body"]["lean_limit_deg"]),
             ("Head drop", f"{body['head_drop'] * 100:.0f}%" if body and body["head_drop"] is not None else "-", bool(body) and body["head_drop"] is not None and body["head_drop"] >= self.config["body"]["head_drop_limit"]),
+            ("Body forward", f"{body['forward'] * 100:.0f}%" if body and body["forward"] is not None else "-", bool(body) and body["forward"] is not None and body["forward"] >= self.config["body"]["forward_limit"]),
         ]
         readings = [ui.Row(None, label, value, ui.RED if past else ui.MUTED if value == "-" else ui.TEXT) for label, value, past in readings]
         return level, signs, checks, calibration, readings
+
+    def _temperature(self):
+        now = time.time()
+        if now - getattr(self, "_temperature_at", 0.0) >= 2.0:
+            self._temperature_at, self._temperature_value = now, cpu_temperature()
+        return self._temperature_value
 
     def _sharpness_row(self, sharpness):
         if sharpness is None:
@@ -451,6 +554,7 @@ class LiveMonitor:
         """Saves the session so far as a PNG report and a CSV under results/sessions."""
         png, csv_path = self.session.save(self.config["paths"]["results_dir"] / "sessions")
         print(f"Saved {png} and {csv_path}")
+        self._export = {"id": time.time(), "files": [png.name, csv_path.name]}
         self._notice, self._notice_until = f"Saved {png.name}", time.time() + 4
 
     def _event_lines(self):
@@ -462,6 +566,14 @@ class LiveMonitor:
         try:
             self.calibrate()
             while True:
+                if self.paused:
+                    self.alarm.set(False)
+                    self._handle_key(self.display.show(self._paused_view(), 100))
+                    if not self.paused:
+                        self.calibrate()
+                        self.events.append((time.strftime("%H:%M:%S"), 0, "recalibrated"))
+                        no_face_since, glare_box, previous = None, None, time.time()
+                    continue
                 if (frame := self._read()) is None:
                     self._camera_lost()
                     self.calibrate()
@@ -493,7 +605,7 @@ class LiveMonitor:
 
                 cues = {}
                 if regions:
-                    predictions = self.eye_model.predict_many([eye.crop for eye in regions.eyes.values()]) if regions.eyes else []
+                    predictions = self.eye_model.predict_many([self._soften(eye.crop) for eye in regions.eyes.values()]) if regions.eyes else []
                     cues = {side: self._eye(frame, side, eye, prediction) for (side, eye), prediction in zip(regions.eyes.items(), predictions)}
                     cues["mouth"] = self._mouth(regions.mouth) if regions.mouth else None
                     cues["head"] = self._head(regions.pitch, regions.roll)

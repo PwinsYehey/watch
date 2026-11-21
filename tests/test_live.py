@@ -80,3 +80,28 @@ def test_mouth_the_model_calls_blocked_is_unreadable():
     monitor = _monitor()
     monitor.yawn_model = SimpleNamespace(predict=lambda crop: ("blocked", 0.95, 0.0))
     assert monitor._mouth(SimpleNamespace(crop=None, ratio=0.05)) is None
+
+
+def test_unsure_yawn_on_a_closed_mouth_reads_no_yawn():
+    cue = _monitor(yawn_open=0.6)._mouth(SimpleNamespace(crop=None, ratio=0.1))
+    assert cue["label"] == "no yawn"
+
+
+def test_eye_crop_is_softened_before_the_model():
+    monitor = _monitor()
+    crop = np.zeros((20, 20, 3), np.uint8)
+    crop[10, 10] = 255
+    assert monitor._soften(crop)[10, 10, 0] < 255
+    monitor.settings["eye_blur"] = 0
+    assert monitor._soften(crop)[10, 10, 0] == 255
+
+
+def test_cpu_temperature_reads_millidegrees(tmp_path, monkeypatch):
+    import watch.live as live
+
+    zone = tmp_path / "temp"
+    zone.write_text("51234\n")
+    monkeypatch.setattr(live, "THERMAL_ZONE", zone)
+    assert live.cpu_temperature() == 51.234
+    monkeypatch.setattr(live, "THERMAL_ZONE", tmp_path / "missing")
+    assert live.cpu_temperature() is None
