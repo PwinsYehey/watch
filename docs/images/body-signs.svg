@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14">
+  <title>Body language signs WATCH looks for</title>
+  <rect width="900" height="300" fill="#ffffff"/>
+  <defs>
+    <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c62828"/>
+    </marker>
+    <g id="head"><circle r="22" fill="#ffd9b8" stroke="#333" stroke-width="2"/><path d="M-24,-4 A24,24 0 0 1 24,-4 L24,4 L-24,4 z" fill="#555"/></g>
+  </defs>
+
+  <!-- 1 Upright -->
+  <g transform="translate(90,0)">
+    <line x1="-70" y1="180" x2="70" y2="180" stroke="#bbb" stroke-dasharray="4 4"/>
+    <use href="#head" x="0" y="115"/>
+    <path d="M-45,180 C-45,150 -25,145 0,145 C25,145 45,150 45,180 L45,230 L-45,230 z" fill="#90a4ae" stroke="#333" stroke-width="2"/>
+    <line x1="-40" y1="160" x2="40" y2="160" stroke="#2e7d32" stroke-width="4"/>
+    <text y="260" text-anchor="middle" font-weight="600" fill="#2e7d32">Upright</text>
+    <text y="280" text-anchor="middle" fill="#555" font-size="12">calibrated posture</text>
+  </g>
+
+  <!-- 2 Slumped -->
+  <g transform="translate(270,0)">
+    <line x1="-70" y1="160" x2="70" y2="160" stroke="#bbb" stroke-dasharray="4 4"/>
+    <use href="#head" x="6" y="150"/>
+    <path d="M-45,200 C-45,180 -25,175 0,178 C25,182 45,190 45,205 L45,240 L-45,240 z" fill="#90a4ae" stroke="#333" stroke-width="2"/>
+    <line x1="-40" y1="185" x2="40" y2="197" stroke="#c62828" stroke-width="4"/>
+    <line x1="-60" y1="162" x2="-60" y2="182" stroke="#c62828" stroke-width="2" marker-end="url(#m)"/>
+    <text y="260" text-anchor="middle" font-weight="600" fill="#c62828">Slumped</text>
+    <text y="280" text-anchor="middle" fill="#555" font-size="12">shoulders drop or tilt, head sinks</text>
+  </g>
+
+  <!-- 3 Leaning forward -->
+  <g transform="translate(450,0)">
+    <use href="#head" x="0" y="105" transform="translate(0,0)"/>
+    <path d="M-60,180 C-60,145 -30,138 0,138 C30,138 60,145 60,180 L60,235 L-60,235 z" fill="#90a4ae" stroke="#333" stroke-width="2"/>
+    <line x1="-55" y1="158" x2="55" y2="158" stroke="#c62828" stroke-width="4"/>
+    <line x1="-40" y1="45" x2="-62" y2="45" stroke="#c62828" stroke-width="2" marker-end="url(#m)"/>
+    <line x1="40" y1="45" x2="62" y2="45" stroke="#c62828" stroke-width="2" marker-end="url(#m)"/>
+    <text y="40" text-anchor="middle" fill="#555" font-size="12">looks wider</text>
+    <text y="260" text-anchor="middle" font-weight="600" fill="#c62828">Leaning forward</text>
+    <text y="280" text-anchor="middle" fill="#555" font-size="12">toward the camera</text>
+  </g>
+
+  <!-- 4 Nodding -->
+  <g transform="translate(630,0)">
+    <use href="#head" x="0" y="115" opacity="0.35"/>
+    <use href="#head" x="0" y="140"/>
+    <path d="M-45,180 C-45,150 -25,145 0,145 C25,145 45,150 45,180 L45,230 L-45,230 z" fill="#90a4ae" stroke="#333" stroke-width="2"/>
+    <path d="M38,95 C58,110 58,135 38,150" stroke="#c62828" stroke-width="2" fill="none" marker-end="url(#m)"/>
+    <path d="M-38,150 C-58,135 -58,110 -38,95" stroke="#c62828" stroke-width="2" fill="none" marker-end="url(#m)"/>
+    <text y="260" text-anchor="middle" font-weight="600" fill="#c62828">Nodding off</text>
+    <text y="280" text-anchor="middle" fill="#555" font-size="12">3 quick drops in 60 s</text>
+  </g>
+
+  <!-- 5 Not moving -->
+  <g transform="translate(810,0)">
+    <use href="#head" x="0" y="115"/>
+    <path d="M-45,180 C-45,150 -25,145 0,145 C25,145 45,150 45,180 L45,230 L-45,230 z" fill="#90a4ae" stroke="#333" stroke-width="2"/>
+    <circle cx="0" cy="55" r="20" fill="none" stroke="#c62828" stroke-width="2"/>
+    <line x1="0" y1="55" x2="0" y2="42" stroke="#c62828" stroke-width="2"/>
+    <line x1="0" y1="55" x2="10" y2="55" stroke="#c62828" stroke-width="2"/>
+    <text y="260" text-anchor="middle" font-weight="600" fill="#c62828">Not moving</text>
+    <text y="280" text-anchor="middle" fill="#555" font-size="12">almost still for 45 s</text>
+  </g>
+</svg>

@@ -1,10 +1,14 @@
 # WATCH on a Raspberry Pi
 
+*Last update: 13 November 2026*
+
 How to run the live monitor on a Raspberry Pi with a camera module and watch it from a browser on a laptop. The Pi needs no screen.
 
 Tested on a Raspberry Pi 4 Model B (8 GB) with Raspberry Pi OS based on Debian 13 (trixie) and a Camera Module 3 NoIR. In the default **both** mode it runs at about 4 to 6 FPS with a face in view, and about 8 to 10 FPS in **body** mode.
 
 ## Hardware
+
+![The camera connects to the Pi's CAMERA port, the Pi takes 5 V 3 A power, and a laptop browser reaches it over an Ethernet cable or the same Wi-Fi](images/pi-setup.svg)
 
 | Part | Details | What it does |
 |---|---|---|
@@ -29,6 +33,59 @@ IR LED boards bought for night vision cameras get no power when screwed onto thi
 
 The IR modules light the face without bothering the person, and a camera with no IR filter can see that light. Eyes were visible through a pair of tinted shades this way, but the monitor has not yet been tested reading eyes through shades or a tinted visor. See [Known limits](#known-limits).
 
+## How it works
+
+What the monitor does from power-on to the alarm, every frame, in the default `both` mode. In `body` mode the face step is skipped.
+
+```mermaid
+flowchart TD
+  BOOT([Pi powers on]) --> SVC[watch.service starts the monitor]
+  SVC --> CAM{Camera found?}
+  CAM -- No --> RETRY[Exit and restart after 5 s] --> SVC
+  CAM -- Yes --> CAL[Calibrate for 4 s<br/>resting eyes, head angle and sitting posture]
+  CAL --> FRAME[Read a camera frame]
+
+  FRAME --> FACEQ{Mode uses the face?<br/>both or face}
+  FACEQ -- Yes --> FACE[Face Mesh<br/>eyes, mouth and head angle]
+  FACE --> FSIGNS[Face signs<br/>eyes closed, yawning, head drooped]
+  FACEQ -- No --> BODY
+  FSIGNS --> BODY
+
+  BODY[Body tracker<br/>shoulders, head and arms] --> BSIGNS[Body signs vs calibrated posture<br/>slumped, leaning forward, nodding off, not moving]
+
+  BSIGNS --> SEEN{Anyone in view?}
+  SEEN -- No --> GONE{Gone 5 s or more?}
+  GONE -- Yes --> CLEAR[Clear the alert, alarm off<br/>recalibrate when someone returns]
+  GONE -- No --> HOLD[Hold the current level]
+  SEEN -- Yes --> LEVEL{Signs now?}
+
+  LEVEL -- None --> NORMAL[NORMAL]
+  LEVEL -- One sign --> WARN[WARNING<br/>watch for 30 s]
+  LEVEL -- Repeats, two signs<br/>or lasts too long --> CRIT[CRITICAL]
+
+  CRIT --> ALARM[Buzzer on the Pi<br/>and beep on the page]
+  NORMAL --> PAGE
+  WARN --> PAGE
+  ALARM --> PAGE
+  HOLD --> PAGE
+  CLEAR --> PAGE
+
+  PAGE[Web page at raspberrypi.local:8766<br/>video, dashboard, recent events] --> KEYS{Button pressed?}
+  KEYS -- None --> FRAME
+  KEYS -- Mute or Export --> FRAME
+  KEYS -- Stop --> SVC
+  KEYS -- Shut down --> OFF([Pi powers off])
+
+  classDef ok fill:#e6f6e6,stroke:#2e7d32,color:#111
+  classDef warn fill:#fff3d6,stroke:#c98500,color:#111
+  classDef bad fill:#fde8e8,stroke:#c62828,color:#111
+  class NORMAL ok
+  class WARN warn
+  class CRIT,ALARM bad
+```
+
+The full flow, including model training and photo analysis, is in [architecture-flowchart.png](architecture-flowchart.png).
+
 ## Detection modes
 
 Set with `mode` under `live` in `configs/config.yaml`, then restart the service.
@@ -43,6 +100,8 @@ Set with `mode` under `live` in `configs/config.yaml`, then restart the service.
 
 All are measured against the sitting posture taken during calibration, so the camera needs the head and both shoulders in view.
 
+![Upright, slumped, leaning forward, nodding off and not moving](images/body-signs.svg)
+
 | Sign | What it means | Setting under `body` |
 |---|---|---|
 | Slumped | The shoulders drop, the shoulder line tilts, or the head sinks toward the shoulders. A raised arm tilts the shoulders, so the tilt is ignored while an arm is up. | `drop_limit`, `lean_limit_deg`, `head_drop_limit` |
@@ -55,6 +114,8 @@ The head position is the average of whichever head points the body tracker can s
 These limits are starting values. They still need tuning with real tests of people wearing helmets.
 
 ## Quick test (Pi already set up)
+
+![The camera sits about 1 metre away, level with the face, with the head and both shoulders in the picture](images/camera-position.svg)
 
 1. Plug in the Pi's power and wait about a minute. The monitor starts by itself.
 2. Connect to it one of two ways:
